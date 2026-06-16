@@ -100,6 +100,43 @@ def _build_grid(events: List[tuple[float, int]]) -> Dict[int, Set[str]]:
     return grid
 
 
+def _hit_token(hits: Set[str]) -> str:
+    """Token LilyPond (semicorchea) para uno o varios golpes simultaneos."""
+    if len(hits) == 1:
+        return f"{next(iter(hits))}16"
+    return "<" + " ".join(sorted(hits)) + ">16"
+
+
+def _measure_tokens(grid: Dict[int, Set[str]], measure: int) -> List[str]:
+    """
+    Tokens de un compas 4/4, agrupando los silencios para que sea legible:
+      - compas entero en silencio  -> r1 (silencio de redonda)
+      - tiempo (negra) en silencio  -> r4
+      - medio tiempo en silencio    -> r8
+      - resto                       -> notas/silencios de semicorchea (16)
+    Las notas se mantienen en semicorcheas; solo se fusionan los silencios.
+    """
+    base = measure * SLOTS_PER_MEASURE
+    if all(grid.get(base + i) is None for i in range(SLOTS_PER_MEASURE)):
+        return ["r1"]
+
+    tokens: List[str] = []
+    for beat in range(4):  # 4 negras por compas
+        b = base + beat * 4
+        beat_slots = [grid.get(b + i) for i in range(4)]
+        if all(s is None for s in beat_slots):
+            tokens.append("r4")
+            continue
+        for half in range(2):  # dos mitades (corcheas) por negra
+            pair = [beat_slots[half * 2], beat_slots[half * 2 + 1]]
+            if pair[0] is None and pair[1] is None:
+                tokens.append("r8")
+            else:
+                for hits in pair:
+                    tokens.append("r16" if hits is None else _hit_token(hits))
+    return tokens
+
+
 def _grid_to_drummode(grid: Dict[int, Set[str]]) -> str:
     """Convierte la rejilla en tokens \\drummode, compas por compas."""
     if not grid:
@@ -113,16 +150,7 @@ def _grid_to_drummode(grid: Dict[int, Set[str]]) -> str:
 
     lines: List[str] = []
     for m in range(num_measures):
-        tokens: List[str] = []
-        for s in range(SLOTS_PER_MEASURE):
-            slot = m * SLOTS_PER_MEASURE + s
-            hits = grid.get(slot)
-            if not hits:
-                tokens.append("r16")
-            elif len(hits) == 1:
-                tokens.append(f"{next(iter(hits))}16")
-            else:
-                tokens.append("<" + " ".join(sorted(hits)) + ">16")
+        tokens = _measure_tokens(grid, m)
         lines.append("  " + " ".join(tokens) + " |")
     return "\n".join(lines)
 
