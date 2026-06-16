@@ -1,0 +1,28 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Archivos generados por la app
+output/*
+!output/.gitkeep
+
+# Modelos / cache de ADTOF y torch
+*.pt
+*.ckpt
+.cache/
+
+# Logs
+*.log
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

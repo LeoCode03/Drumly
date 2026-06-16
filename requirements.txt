@@ -1,0 +1,28 @@
+# Drumly - dependencias Python (usar Python 3.11)
+# Instalar con:  pip install -r requirements.txt
+# Ademas hay que instalar APARTE: LilyPond y ffmpeg (ver README.md)
+
+# --- Separacion de audio ---
+demucs
+torch          # backend de Demucs y de ADTOF (auto CPU/GPU)
+torchaudio
+
+# --- Transcripcion de bateria (audio -> MIDI) ---
+# ADTOF-pytorch se instala desde su repositorio, no desde PyPI (trae los pesos
+# del modelo incluidos y solo depende de torch/librosa/pretty_midi):
+#   pip install git+https://github.com/xavriley/ADTOF-pytorch.git
+# (ver seccion "Instalar ADTOF" en el README).
+librosa
+
+# --- MIDI y partitura ---
+# (music21 se descarto: importa la bateria como notas Unpitched y pierde el
+#  numero de nota MIDI; leemos el MIDI con pretty_midi y generamos LilyPond a mano)
+pretty_midi
+mido
+
+# --- Audio utils ---
+soundfile
+numpy
+
+# --- Interfaz grafica ---
+customtkinter
