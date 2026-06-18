@@ -38,11 +38,13 @@ def run_pipeline(
     audio_path: str,
     output_dir: str = "output",
     progress: Optional[Callable[[str], None]] = None,
+    show_rests: bool = True,
 ) -> PipelineResult:
     """
     Ejecuta el pipeline completo sobre `audio_path`.
 
     `progress(msg)` se llama con texto descriptivo en cada etapa (lo usa la UI).
+    `show_rests`: si es False, la partitura oculta los silencios (solo notas tocadas).
     Devuelve un PipelineResult con las rutas de los 3 archivos generados.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -57,6 +59,6 @@ def run_pipeline(
     # 2. Transcripcion a MIDI
     transcribe(drums_wav, drums_mid, progress=progress)
     # 3. Partitura PDF
-    score_pdf = midi_to_pdf(drums_mid, score_pdf, progress=progress)
+    score_pdf = midi_to_pdf(drums_mid, score_pdf, progress=progress, show_rests=show_rests)
 
     return PipelineResult(drums_wav=drums_wav, drums_mid=drums_mid, score_pdf=score_pdf)

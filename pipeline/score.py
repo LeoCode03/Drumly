@@ -107,50 +107,64 @@ def _hit_token(hits: Set[str]) -> str:
     return "<" + " ".join(sorted(hits)) + ">16"
 
 
-def _measure_tokens(grid: Dict[int, Set[str]], measure: int) -> List[str]:
+def _measure_tokens(
+    grid: Dict[int, Set[str]], measure: int, rest_char: str = "r"
+) -> List[str]:
     """
     Tokens de un compas 4/4, agrupando los silencios para que sea legible:
-      - compas entero en silencio  -> r1 (silencio de redonda)
-      - tiempo (negra) en silencio  -> r4
-      - medio tiempo en silencio    -> r8
+      - compas entero en silencio  -> redonda
+      - tiempo (negra) en silencio  -> negra
+      - medio tiempo en silencio    -> corchea
       - resto                       -> notas/silencios de semicorchea (16)
     Las notas se mantienen en semicorcheas; solo se fusionan los silencios.
+
+    `rest_char` es 'r' para silencios visibles o 's' (skip) para tiempo invisible
+    que ocupa el compas sin imprimir ningun simbolo.
     """
     base = measure * SLOTS_PER_MEASURE
     if all(grid.get(base + i) is None for i in range(SLOTS_PER_MEASURE)):
-        return ["r1"]
+        return [f"{rest_char}1"]
 
     tokens: List[str] = []
     for beat in range(4):  # 4 negras por compas
         b = base + beat * 4
         beat_slots = [grid.get(b + i) for i in range(4)]
         if all(s is None for s in beat_slots):
-            tokens.append("r4")
+            tokens.append(f"{rest_char}4")
             continue
         for half in range(2):  # dos mitades (corcheas) por negra
             pair = [beat_slots[half * 2], beat_slots[half * 2 + 1]]
             if pair[0] is None and pair[1] is None:
-                tokens.append("r8")
+                tokens.append(f"{rest_char}8")
             else:
                 for hits in pair:
-                    tokens.append("r16" if hits is None else _hit_token(hits))
+                    tokens.append(
+                        f"{rest_char}16" if hits is None else _hit_token(hits)
+                    )
     return tokens
 
 
-def _grid_to_drummode(grid: Dict[int, Set[str]]) -> str:
-    """Convierte la rejilla en tokens \\drummode, compas por compas."""
+def _grid_to_drummode(grid: Dict[int, Set[str]], show_rests: bool = True) -> str:
+    """
+    Convierte la rejilla en tokens \\drummode, compas por compas.
+
+    Si `show_rests` es False se usan 'skips' (s) en vez de silencios (r): el
+    tiempo se respeta pero no se imprime ningun simbolo de silencio, asi que solo
+    se ven las notas que se tocan.
+    """
     if not grid:
         raise ValueError(
             "No se detectaron golpes de bateria en el MIDI. "
             "La cancion puede no tener bateria o la transcripcion fallo."
         )
 
+    rest_char = "r" if show_rests else "s"
     last_slot = max(grid)
     num_measures = last_slot // SLOTS_PER_MEASURE + 1
 
     lines: List[str] = []
     for m in range(num_measures):
-        tokens = _measure_tokens(grid, m)
+        tokens = _measure_tokens(grid, m, rest_char=rest_char)
         lines.append("  " + " ".join(tokens) + " |")
     return "\n".join(lines)
 
@@ -184,11 +198,13 @@ def midi_to_pdf(
     midi_path: str,
     output_pdf_path: str,
     progress: Optional[Callable[[str], None]] = None,
+    show_rests: bool = True,
 ) -> str:
     """
     Convierte `midi_path` en una partitura PDF guardada en `output_pdf_path`.
 
     `progress` es un callback opcional para reportar el estado (lo usa la UI).
+    `show_rests`: si es False, oculta los silencios y solo muestra las notas tocadas.
     Devuelve la ruta del PDF generado.
     """
     def report(msg: str) -> None:
@@ -202,7 +218,7 @@ def midi_to_pdf(
 
     report("Cuantizando golpes...")
     grid = _build_grid(events)
-    drummode = _grid_to_drummode(grid)
+    drummode = _grid_to_drummode(grid, show_rests=show_rests)
 
     title = os.path.splitext(os.path.basename(output_pdf_path))[0]
     out_dir = os.path.dirname(os.path.abspath(output_pdf_path))

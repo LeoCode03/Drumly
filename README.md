@@ -82,8 +82,10 @@ python main.py
 ```
 
 1. Pulsa **Seleccionar archivo** y elige un MP3 o WAV.
-2. Verás el progreso: *Separando instrumentos… → Transcribiendo batería… → Generando partitura…*
-3. Al terminar, usa **Abrir PDF** o **Abrir carpeta output**.
+2. (Opcional) Marca **Mostrar silencios en la partitura** si quieres ver los
+   silencios; por defecto está desactivado y solo se muestran las notas tocadas.
+3. Verás el progreso: *Separando instrumentos… → Transcribiendo batería… → Generando partitura…*
+4. Al terminar, usa **Abrir PDF** o **Abrir carpeta output**.
 
 Los archivos se guardan en `output/` con el nombre de la canción:
 `cancion_drums.wav`, `cancion_drums.mid`, `cancion_partitura.pdf`.

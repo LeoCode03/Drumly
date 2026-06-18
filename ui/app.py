@@ -87,7 +87,17 @@ class DrumlyApp(ctk.CTk):
             fg_color="#2e7d32",
             hover_color="#1b5e20",
         )
-        self.start_btn.pack(pady=(0, 20))
+        self.start_btn.pack(pady=(0, 12))
+
+        # Opcion: mostrar u ocultar los silencios en la partitura.
+        # Por defecto desactivada -> solo se ven las notas que se tocan.
+        self.show_rests_var = ctk.BooleanVar(value=False)
+        self.show_rests_check = ctk.CTkCheckBox(
+            container,
+            text="Mostrar silencios en la partitura",
+            variable=self.show_rests_var,
+        )
+        self.show_rests_check.pack(pady=(0, 18))
 
         self.progress = ctk.CTkProgressBar(container, mode="indeterminate")
         self.progress.pack(fill="x", pady=(0, 8))
@@ -133,6 +143,8 @@ class DrumlyApp(ctk.CTk):
         if not self._audio_path:
             return
         self._clear_result()
+        # Capturamos el valor antes de lanzar el hilo (no tocar widgets desde el hilo).
+        self._show_rests = bool(self.show_rests_var.get())
         self._set_busy(True)
         thread = threading.Thread(target=self._run_worker, daemon=True)
         thread.start()
@@ -149,6 +161,7 @@ class DrumlyApp(ctk.CTk):
                 self._audio_path,  # type: ignore[arg-type]
                 output_dir=OUTPUT_DIR,
                 progress=lambda msg: self._msg_queue.put(("stage", msg)),
+                show_rests=getattr(self, "_show_rests", False),
             )
             self._result = result
             self._msg_queue.put(("done", result.score_pdf))
