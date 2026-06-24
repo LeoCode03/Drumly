@@ -7,15 +7,27 @@ batería y genera una **partitura PDF** lista para leer.
 
 ```
 tu_cancion.mp3
-   │  1. Demucs separa la batería del resto de la mezcla
-   ▼
-tu_cancion_drums.wav        ← solo batería
+   │  1. Demucs separa la mezcla en stems
+   ├─▶ tu_cancion_drums.wav         ← solo batería
+   └─▶ tu_cancion_sin_bateria.wav   ← todo menos la batería
    │  2. ADTOF "escucha" la batería y detecta cada golpe
    ▼
 tu_cancion_drums.mid        ← MIDI (las notas, no audio)
-   │  3. music21 + LilyPond dibujan las notas en pentagrama
+   │  3. pretty_midi + LilyPond dibujan las notas en pentagrama
    ▼
 tu_cancion_partitura.pdf    ← partitura final
+   +  BPM estimado con librosa
+```
+
+Cada canción genera su **propia carpeta** dentro de `output/`:
+
+```
+output/
+└── Yo Soy de Bolivia/
+    ├── Yo Soy de Bolivia_drums.wav
+    ├── Yo Soy de Bolivia_sin_bateria.wav
+    ├── Yo Soy de Bolivia_drums.mid
+    └── Yo Soy de Bolivia_partitura.pdf
 ```
 
 > **Nota sobre el MIDI:** un MP3/WAV es *sonido grabado*; un MIDI son *instrucciones*
@@ -85,7 +97,12 @@ python main.py
 2. (Opcional) Marca **Mostrar silencios en la partitura** si quieres ver los
    silencios; por defecto está desactivado y solo se muestran las notas tocadas.
 3. Verás el progreso: *Separando instrumentos… → Transcribiendo batería… → Generando partitura…*
-4. Al terminar, usa **Abrir PDF** o **Abrir carpeta output**.
+4. Al terminar se abre la **pantalla de mezcla**:
+   - Sliders de volumen para **Batería** y **Otros** (sin batería), en vivo.
+   - **Play/Pausa**, barra de progreso con tiempo y **BPM** estimado.
+   - Botón 📄 para abrir la **partitura PDF**.
+   - **Export** → guardar la *mezcla de audio* (con tus volúmenes), abrir el *PDF*
+     o abrir la *carpeta* de la canción.
 
 Los archivos se guardan en `output/` con el nombre de la canción:
 `cancion_drums.wav`, `cancion_drums.mid`, `cancion_partitura.pdf`.

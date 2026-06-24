@@ -26,3 +26,6 @@ numpy
 
 # --- Interfaz grafica ---
 customtkinter
+
+# --- Reproduccion / mezcla de audio en la UI ---
+sounddevice

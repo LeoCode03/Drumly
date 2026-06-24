@@ -49,16 +49,20 @@ def _ensure_ffmpeg_on_path() -> None:
                 return
 
 
-def separate_drums(
+def separate(
     audio_path: str,
-    out_wav: str,
+    out_drums: str,
+    out_no_drums: Optional[str] = None,
     progress: Optional[Callable[[str], None]] = None,
-) -> str:
+) -> tuple[str, Optional[str]]:
     """
-    Separa la bateria de `audio_path` y la guarda como WAV en `out_wav`.
+    Separa `audio_path` con Demucs (una sola pasada) y guarda:
+      - la bateria en `out_drums`
+      - (opcional) el resto de la mezcla SIN bateria en `out_no_drums`
+        (suma de bass + other + vocals).
 
     `progress` es un callback opcional para reportar estado (lo usa la UI).
-    Devuelve la ruta del WAV de bateria.
+    Devuelve (ruta_bateria, ruta_sin_bateria | None).
     """
     def report(msg: str) -> None:
         if progress:
@@ -111,25 +115,44 @@ def separate_drums(
         raise RuntimeError(
             "El modelo no expone un stem 'drums'. Stems: " + ", ".join(model.sources)
         )
-    drums = sources[model.sources.index("drums")]
+    drums_idx = model.sources.index("drums")
 
-    os.makedirs(os.path.dirname(os.path.abspath(out_wav)) or ".", exist_ok=True)
-    report("Guardando pista de bateria...")
     # Guardamos con soundfile (espera [frames, canales]) en vez de la utilidad de
     # Demucs, que enruta por torchaudio/torchcodec y es fragil entre versiones.
-    sf.write(out_wav, drums.cpu().numpy().T, model.samplerate)
+    report("Guardando pista de bateria...")
+    os.makedirs(os.path.dirname(os.path.abspath(out_drums)) or ".", exist_ok=True)
+    sf.write(out_drums, sources[drums_idx].cpu().numpy().T, model.samplerate)
 
-    report("Bateria aislada.")
-    return out_wav
+    if out_no_drums:
+        report("Guardando mezcla sin bateria...")
+        os.makedirs(os.path.dirname(os.path.abspath(out_no_drums)) or ".", exist_ok=True)
+        no_drums = sum(
+            sources[i] for i in range(len(model.sources)) if i != drums_idx
+        )
+        sf.write(out_no_drums, no_drums.cpu().numpy().T, model.samplerate)
+
+    report("Separacion lista.")
+    return out_drums, (out_no_drums if out_no_drums else None)
+
+
+def separate_drums(
+    audio_path: str,
+    out_wav: str,
+    progress: Optional[Callable[[str], None]] = None,
+) -> str:
+    """Compat: separa solo la bateria. Devuelve la ruta del WAV de bateria."""
+    drums, _ = separate(audio_path, out_wav, None, progress=progress)
+    return drums
 
 
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Uso: python -m pipeline.separator <cancion.mp3|wav> [salida_drums.wav]")
+        print("Uso: python -m pipeline.separator <cancion.mp3|wav> [drums.wav] [sin_bateria.wav]")
         raise SystemExit(1)
 
     src = sys.argv[1]
-    out = sys.argv[2] if len(sys.argv) > 2 else os.path.splitext(src)[0] + "_drums.wav"
-    print("WAV generado:", separate_drums(src, out, progress=print))
+    out_d = sys.argv[2] if len(sys.argv) > 2 else os.path.splitext(src)[0] + "_drums.wav"
+    out_n = sys.argv[3] if len(sys.argv) > 3 else None
+    print("Generado:", separate(src, out_d, out_n, progress=print))

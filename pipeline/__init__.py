@@ -1,9 +1,12 @@
 """
 pipeline — Orquesta el flujo completo:
 
-    audio (mp3/wav)  --Demucs-->  _drums.wav
+    audio (mp3/wav)  --Demucs-->  _drums.wav  +  _sin_bateria.wav
                      --ADTOF-->   _drums.mid
-                     --music21+LilyPond-->  _partitura.pdf
+                     --LilyPond-->  _partitura.pdf
+                     --librosa-->  BPM
+
+Cada cancion genera su propia subcarpeta dentro de output/.
 """
 
 from __future__ import annotations
@@ -13,15 +16,16 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from .analyze import estimate_bpm
 from .score import midi_to_pdf
-from .separator import separate_drums
+from .separator import separate
 from .transcriber import transcribe
 
 __all__ = ["run_pipeline", "PipelineResult"]
 
 
 def _safe_stem(audio_path: str) -> str:
-    """Nombre base de la cancion, sin extension y saneado para archivos."""
+    """Nombre base de la cancion, sin extension y saneado para archivos/carpeta."""
     stem = os.path.splitext(os.path.basename(audio_path))[0]
     stem = re.sub(r"[^\w\-]+", "_", stem, flags=re.UNICODE).strip("_")
     return stem or "cancion"
@@ -29,9 +33,13 @@ def _safe_stem(audio_path: str) -> str:
 
 @dataclass
 class PipelineResult:
+    song_name: str
+    song_dir: str
     drums_wav: str
+    no_drums_wav: str
     drums_mid: str
     score_pdf: str
+    bpm: Optional[int]
 
 
 def run_pipeline(
@@ -45,20 +53,36 @@ def run_pipeline(
 
     `progress(msg)` se llama con texto descriptivo en cada etapa (lo usa la UI).
     `show_rests`: si es False, la partitura oculta los silencios (solo notas tocadas).
-    Devuelve un PipelineResult con las rutas de los 3 archivos generados.
+
+    Genera una subcarpeta output/<cancion>/ con los stems, el MIDI y el PDF, y
+    devuelve un PipelineResult con todas las rutas y el BPM estimado.
     """
-    os.makedirs(output_dir, exist_ok=True)
     stem = _safe_stem(audio_path)
+    song_dir = os.path.join(output_dir, stem)
+    os.makedirs(song_dir, exist_ok=True)
 
-    drums_wav = os.path.join(output_dir, f"{stem}_drums.wav")
-    drums_mid = os.path.join(output_dir, f"{stem}_drums.mid")
-    score_pdf = os.path.join(output_dir, f"{stem}_partitura.pdf")
+    drums_wav = os.path.join(song_dir, f"{stem}_drums.wav")
+    no_drums_wav = os.path.join(song_dir, f"{stem}_sin_bateria.wav")
+    drums_mid = os.path.join(song_dir, f"{stem}_drums.mid")
+    score_pdf = os.path.join(song_dir, f"{stem}_partitura.pdf")
 
-    # 1. Separacion
-    separate_drums(audio_path, drums_wav, progress=progress)
+    # 1. Separacion (bateria + sin bateria, una sola pasada de Demucs)
+    separate(audio_path, drums_wav, no_drums_wav, progress=progress)
     # 2. Transcripcion a MIDI
     transcribe(drums_wav, drums_mid, progress=progress)
     # 3. Partitura PDF
     score_pdf = midi_to_pdf(drums_mid, score_pdf, progress=progress, show_rests=show_rests)
+    # 4. BPM (informativo)
+    if progress:
+        progress("Estimando BPM...")
+    bpm = estimate_bpm(drums_wav)
 
-    return PipelineResult(drums_wav=drums_wav, drums_mid=drums_mid, score_pdf=score_pdf)
+    return PipelineResult(
+        song_name=stem,
+        song_dir=song_dir,
+        drums_wav=drums_wav,
+        no_drums_wav=no_drums_wav,
+        drums_mid=drums_mid,
+        score_pdf=score_pdf,
+        bpm=bpm,
+    )

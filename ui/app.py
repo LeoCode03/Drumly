@@ -1,13 +1,13 @@
 """
 app.py — Interfaz grafica (CustomTkinter) de Drumly.
 
-- Modo oscuro.
-- Boton para seleccionar audio (MP3/WAV).
-- Barra de progreso indeterminada + texto de etapa.
-- El pipeline corre en un hilo aparte para no congelar la UI; los widgets se
-  actualizan siempre desde el hilo principal con self.after(...).
-- Al terminar: botones para abrir el PDF y la carpeta output.
-- Los errores se muestran en rojo en la propia ventana.
+Dos vistas:
+  1. Entrada: seleccionar audio, opciones y generar (pipeline en hilo aparte).
+  2. Mezclador (estilo reproductor de stems): volumen de bateria / sin bateria en
+     vivo, play/pausa, barra de progreso con tiempo, BPM y boton Export.
+
+Regla de oro de Tkinter: el pipeline corre en un hilo, pero los widgets solo se
+tocan desde el hilo principal (via cola de mensajes + self.after).
 """
 
 from __future__ import annotations
@@ -23,8 +23,13 @@ import customtkinter as ctk
 from tkinter import filedialog
 
 from pipeline import PipelineResult, run_pipeline
+from ui.player import DualTrackPlayer
 
 OUTPUT_DIR = os.path.abspath("output")
+
+ACCENT = "#1db954"        # verde
+ACCENT_HOVER = "#17a347"
+CYAN = "#2ee6c7"
 
 
 def _open_path(path: str) -> None:
@@ -37,94 +42,193 @@ def _open_path(path: str) -> None:
         subprocess.run(["xdg-open", path])
 
 
+def _fmt_time(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60:02d}:{seconds % 60:02d}"
+
+
 class DrumlyApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
 
         ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
+        ctk.set_default_color_theme("green")
 
         self.title("Drumly — Transcriptor de bateria")
-        self.geometry("560x420")
-        self.minsize(520, 400)
+        self.geometry("480x760")
+        self.minsize(440, 680)
 
         self._audio_path: Optional[str] = None
         self._result: Optional[PipelineResult] = None
         self._msg_queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
 
-        self._build_widgets()
+        self.player = DualTrackPlayer()
+        self._user_seeking = False
+
+        self.container = ctk.CTkFrame(self, fg_color="transparent")
+        self.container.pack(fill="both", expand=True, padx=20, pady=20)
+
+        self._build_input_view()
+        self._build_mixer_view()
+        self._show_input()
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._poll_queue)
+        self.after(200, self._tick)
 
-    # ---------------------------------------------------------------- widgets
-    def _build_widgets(self) -> None:
-        container = ctk.CTkFrame(self, fg_color="transparent")
-        container.pack(fill="both", expand=True, padx=24, pady=24)
+    # ============================================================ VISTA ENTRADA
+    def _build_input_view(self) -> None:
+        f = ctk.CTkFrame(self.container, fg_color="transparent")
+        self.input_frame = f
 
+        ctk.CTkLabel(f, text="🥁 Drumly", font=ctk.CTkFont(size=30, weight="bold")).pack(
+            pady=(10, 4)
+        )
         ctk.CTkLabel(
-            container, text="🥁 Drumly", font=ctk.CTkFont(size=28, weight="bold")
-        ).pack(pady=(0, 4))
-        ctk.CTkLabel(
-            container,
-            text="De MP3/WAV a partitura de bateria en PDF",
-            text_color="gray70",
-        ).pack(pady=(0, 20))
+            f, text="De MP3/WAV a partitura de bateria en PDF", text_color="gray70"
+        ).pack(pady=(0, 24))
 
         self.select_btn = ctk.CTkButton(
-            container, text="Seleccionar archivo de audio", command=self._on_select
+            f, text="Seleccionar archivo de audio", command=self._on_select, height=40
         )
-        self.select_btn.pack(pady=(0, 8))
+        self.select_btn.pack(pady=(0, 8), fill="x")
 
         self.file_label = ctk.CTkLabel(
-            container, text="Ningun archivo seleccionado", text_color="gray60"
+            f, text="Ningun archivo seleccionado", text_color="gray60"
         )
         self.file_label.pack(pady=(0, 16))
 
         self.start_btn = ctk.CTkButton(
-            container,
-            text="Generar partitura",
-            command=self._on_start,
-            state="disabled",
-            fg_color="#2e7d32",
-            hover_color="#1b5e20",
+            f, text="Generar partitura", command=self._on_start, state="disabled",
+            height=44, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            font=ctk.CTkFont(size=15, weight="bold"),
         )
-        self.start_btn.pack(pady=(0, 12))
+        self.start_btn.pack(pady=(0, 14), fill="x")
 
-        # Opcion: mostrar u ocultar los silencios en la partitura.
-        # Por defecto desactivada -> solo se ven las notas que se tocan.
         self.show_rests_var = ctk.BooleanVar(value=False)
-        self.show_rests_check = ctk.CTkCheckBox(
-            container,
-            text="Mostrar silencios en la partitura",
-            variable=self.show_rests_var,
-        )
-        self.show_rests_check.pack(pady=(0, 18))
+        ctk.CTkCheckBox(
+            f, text="Mostrar silencios en la partitura", variable=self.show_rests_var
+        ).pack(pady=(0, 18))
 
-        self.progress = ctk.CTkProgressBar(container, mode="indeterminate")
+        self.progress = ctk.CTkProgressBar(f, mode="indeterminate")
         self.progress.pack(fill="x", pady=(0, 8))
         self.progress.set(0)
 
-        self.stage_label = ctk.CTkLabel(container, text="", text_color="gray80")
+        self.stage_label = ctk.CTkLabel(f, text="", text_color="gray80")
         self.stage_label.pack(pady=(0, 8))
 
         self.error_label = ctk.CTkLabel(
-            container, text="", text_color="#ef5350", wraplength=480, justify="left"
+            f, text="", text_color="#ef5350", wraplength=420, justify="left"
         )
         self.error_label.pack(pady=(0, 8))
 
-        # Botones de resultado (ocultos hasta terminar)
-        self.result_frame = ctk.CTkFrame(container, fg_color="transparent")
-        self.open_pdf_btn = ctk.CTkButton(
-            self.result_frame, text="Abrir PDF", command=self._on_open_pdf
-        )
-        self.open_pdf_btn.pack(side="left", padx=6)
-        self.open_folder_btn = ctk.CTkButton(
-            self.result_frame,
-            text="Abrir carpeta output",
-            command=lambda: _open_path(OUTPUT_DIR),
-        )
-        self.open_folder_btn.pack(side="left", padx=6)
+    # ============================================================ VISTA MEZCLADOR
+    def _build_mixer_view(self) -> None:
+        f = ctk.CTkFrame(self.container, fg_color="transparent")
+        self.mixer_frame = f
 
-    # ----------------------------------------------------------------- events
+        # --- Barra superior: volver + titulo ---
+        top = ctk.CTkFrame(f, fg_color="transparent")
+        top.pack(fill="x", pady=(0, 18))
+        ctk.CTkButton(
+            top, text="←", width=40, height=36, command=self._show_input,
+            fg_color="transparent", hover_color="#2a2a2a",
+            font=ctk.CTkFont(size=20, weight="bold"),
+        ).pack(side="left")
+        self.song_title = ctk.CTkLabel(
+            top, text="", font=ctk.CTkFont(size=17, weight="bold"), wraplength=320
+        )
+        self.song_title.pack(side="left", expand=True)
+
+        # --- Pista: Bateria ---
+        self._build_track_row(f, "🥁", "Bateria", self._on_vol_drums)
+        # --- Pista: Otros (sin bateria) ---
+        self._build_track_row(f, "🎵", "Otros", self._on_vol_no_drums)
+
+        # espacio flexible
+        ctk.CTkFrame(f, fg_color="transparent", height=40).pack(expand=True, fill="both")
+
+        # --- Barra de progreso + tiempos ---
+        self.seek = ctk.CTkSlider(f, from_=0, to=1, command=self._on_seek)
+        self.seek.set(0)
+        self.seek.pack(fill="x", pady=(0, 4))
+        self.seek.bind("<ButtonPress-1>", lambda e: setattr(self, "_user_seeking", True))
+        self.seek.bind("<ButtonRelease-1>", self._on_seek_release)
+
+        times = ctk.CTkFrame(f, fg_color="transparent")
+        times.pack(fill="x", pady=(0, 16))
+        self.time_cur = ctk.CTkLabel(times, text="00:00", text_color="gray70")
+        self.time_cur.pack(side="left")
+        self.time_total = ctk.CTkLabel(times, text="00:00", text_color="gray70")
+        self.time_total.pack(side="right")
+
+        # --- Controles: BPM | Play | PDF ---
+        controls = ctk.CTkFrame(f, fg_color="transparent")
+        controls.pack(fill="x", pady=(0, 18))
+        controls.grid_columnconfigure((0, 1, 2), weight=1)
+
+        bpm_box = ctk.CTkFrame(controls, fg_color="transparent")
+        bpm_box.grid(row=0, column=0)
+        ctk.CTkLabel(bpm_box, text="⏱", font=ctk.CTkFont(size=22)).pack()
+        self.bpm_label = ctk.CTkLabel(
+            bpm_box, text="-- BPM", font=ctk.CTkFont(size=13, weight="bold")
+        )
+        self.bpm_label.pack()
+
+        self.play_btn = ctk.CTkButton(
+            controls, text="▶", width=64, height=64, corner_radius=32,
+            command=self._on_play_pause, font=ctk.CTkFont(size=22),
+            fg_color="#2a2a2a", hover_color="#3a3a3a",
+        )
+        self.play_btn.grid(row=0, column=1)
+
+        pdf_box = ctk.CTkFrame(controls, fg_color="transparent")
+        pdf_box.grid(row=0, column=2)
+        ctk.CTkButton(
+            pdf_box, text="📄", width=48, height=40, command=self._on_open_pdf,
+            fg_color="transparent", hover_color="#2a2a2a", font=ctk.CTkFont(size=20),
+        ).pack()
+        ctk.CTkLabel(pdf_box, text="Partitura", text_color="gray70",
+                     font=ctk.CTkFont(size=12)).pack()
+
+        # --- Export ---
+        self.export_btn = ctk.CTkButton(
+            f, text="Export", command=self._on_export, height=48,
+            corner_radius=24, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            font=ctk.CTkFont(size=17, weight="bold"),
+        )
+        self.export_btn.pack(fill="x", pady=(0, 4))
+
+        self.mixer_msg = ctk.CTkLabel(f, text="", text_color="gray70")
+        self.mixer_msg.pack(pady=(4, 0))
+
+    def _build_track_row(self, parent, icon: str, name: str, command) -> None:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=8)
+        ctk.CTkLabel(
+            row, text=icon, width=48, height=48, corner_radius=12,
+            fg_color="#16241e", font=ctk.CTkFont(size=22),
+        ).pack(side="left", padx=(0, 14))
+        col = ctk.CTkFrame(row, fg_color="transparent")
+        col.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(col, text=name, anchor="w", text_color="gray80").pack(
+            fill="x", pady=(0, 2)
+        )
+        slider = ctk.CTkSlider(col, from_=0, to=150, number_of_steps=150, command=command)
+        slider.set(100)
+        slider.pack(fill="x")
+
+    # ----------------------------------------------------------- cambios de vista
+    def _show_input(self) -> None:
+        self.player.pause()
+        self.mixer_frame.pack_forget()
+        self.input_frame.pack(fill="both", expand=True)
+
+    def _show_mixer(self) -> None:
+        self.input_frame.pack_forget()
+        self.mixer_frame.pack(fill="both", expand=True)
+
+    # ----------------------------------------------------------------- eventos
     def _on_select(self) -> None:
         path = filedialog.askopenfilename(
             title="Selecciona una cancion",
@@ -133,29 +237,57 @@ class DrumlyApp(ctk.CTk):
         if not path:
             return
         self._audio_path = path
-        self.file_label.configure(
-            text=os.path.basename(path), text_color="gray85"
-        )
+        self.file_label.configure(text=os.path.basename(path), text_color="gray85")
         self.start_btn.configure(state="normal")
-        self._clear_result()
+        self.error_label.configure(text="")
+        self.stage_label.configure(text="")
 
     def _on_start(self) -> None:
         if not self._audio_path:
             return
-        self._clear_result()
-        # Capturamos el valor antes de lanzar el hilo (no tocar widgets desde el hilo).
+        self.error_label.configure(text="")
         self._show_rests = bool(self.show_rests_var.get())
         self._set_busy(True)
-        thread = threading.Thread(target=self._run_worker, daemon=True)
-        thread.start()
+        threading.Thread(target=self._run_worker, daemon=True).start()
 
     def _on_open_pdf(self) -> None:
         if self._result and os.path.isfile(self._result.score_pdf):
             _open_path(self._result.score_pdf)
 
+    # --- volumen / seek / play ---
+    def _on_vol_drums(self, value: float) -> None:
+        self.player.set_gain_drums(value / 100.0)
+
+    def _on_vol_no_drums(self, value: float) -> None:
+        self.player.set_gain_no_drums(value / 100.0)
+
+    def _on_seek(self, value: float) -> None:
+        if self.player.loaded:
+            self.player.seek_fraction(float(value))
+
+    def _on_seek_release(self, _event) -> None:
+        self._user_seeking = False
+
+    def _on_play_pause(self) -> None:
+        if not self.player.loaded:
+            return
+        if self.player.is_playing:
+            self.player.pause()
+            self.play_btn.configure(text="▶")
+        else:
+            try:
+                self.player.play()
+                self.play_btn.configure(text="⏸")
+            except Exception as exc:  # noqa: BLE001
+                self.mixer_msg.configure(text=f"No se pudo reproducir: {exc}")
+
+    def _on_export(self) -> None:
+        if not self._result:
+            return
+        ExportDialog(self, self._result, self.player)
+
     # ----------------------------------------------------------- worker / UI
     def _run_worker(self) -> None:
-        """Corre en un hilo aparte. Comunica con la UI por cola de mensajes."""
         try:
             result = run_pipeline(
                 self._audio_path,  # type: ignore[arg-type]
@@ -164,12 +296,11 @@ class DrumlyApp(ctk.CTk):
                 show_rests=getattr(self, "_show_rests", False),
             )
             self._result = result
-            self._msg_queue.put(("done", result.score_pdf))
-        except Exception as exc:  # noqa: BLE001 — mostramos cualquier error en la UI
+            self._msg_queue.put(("done", ""))
+        except Exception as exc:  # noqa: BLE001
             self._msg_queue.put(("error", str(exc)))
 
     def _poll_queue(self) -> None:
-        """Procesa los mensajes del hilo trabajador en el hilo principal."""
         try:
             while True:
                 kind, payload = self._msg_queue.get_nowait()
@@ -185,13 +316,42 @@ class DrumlyApp(ctk.CTk):
 
     def _on_finished_ok(self) -> None:
         self._set_busy(False)
-        self.stage_label.configure(text="✅ Partitura generada con exito")
-        self.result_frame.pack(pady=(8, 0))
+        self.stage_label.configure(text="")
+        result = self._result
+        assert result is not None
+
+        # Cargar stems en el reproductor y poblar la vista mezclador.
+        try:
+            self.player.load(result.drums_wav, result.no_drums_wav)
+        except Exception as exc:  # noqa: BLE001
+            self.mixer_msg.configure(text=f"Audio no disponible: {exc}")
+
+        self.song_title.configure(text=result.song_name)
+        self.bpm_label.configure(
+            text=(f"{result.bpm} BPM" if result.bpm else "-- BPM")
+        )
+        self.time_total.configure(text=_fmt_time(self.player.duration()))
+        self.time_cur.configure(text="00:00")
+        self.seek.set(0)
+        self.play_btn.configure(text="▶")
+        self.mixer_msg.configure(
+            text="" if self.player.available else "Sin dispositivo de audio para reproducir."
+        )
+        self._show_mixer()
 
     def _on_finished_error(self, message: str) -> None:
         self._set_busy(False)
         self.stage_label.configure(text="")
         self.error_label.configure(text=f"❌ Error: {message}")
+
+    def _tick(self) -> None:
+        """Actualiza la barra de progreso y el tiempo durante la reproduccion."""
+        if self.player.loaded and not self._user_seeking:
+            self.time_cur.configure(text=_fmt_time(self.player.position()))
+            self.seek.set(self.player.fraction())
+            if self.player.finished and not self.player.is_playing:
+                self.play_btn.configure(text="▶")
+        self.after(200, self._tick)
 
     # ----------------------------------------------------------------- helpers
     def _set_busy(self, busy: bool) -> None:
@@ -205,11 +365,66 @@ class DrumlyApp(ctk.CTk):
             self.select_btn.configure(state="normal")
             self.start_btn.configure(state="normal")
 
-    def _clear_result(self) -> None:
-        self._result = None
-        self.error_label.configure(text="")
-        self.stage_label.configure(text="")
-        self.result_frame.pack_forget()
+    def _on_close(self) -> None:
+        self.player.close()
+        self.destroy()
+
+
+class ExportDialog(ctk.CTkToplevel):
+    """Pequeno menu de exportacion (mezcla / PDF / carpeta)."""
+
+    def __init__(self, master, result: PipelineResult, player: DualTrackPlayer) -> None:
+        super().__init__(master)
+        self.title("Export")
+        self.geometry("360x260")
+        self.result = result
+        self.player = player
+        self.transient(master)
+        self.grab_set()
+
+        ctk.CTkLabel(
+            self, text="Exportar", font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(pady=(18, 12))
+
+        ctk.CTkButton(
+            self, text="🎚  Mezcla de audio (WAV)", height=42, command=self._export_mix
+        ).pack(fill="x", padx=20, pady=6)
+        ctk.CTkButton(
+            self, text="📄  Partitura PDF", height=42, command=self._export_pdf
+        ).pack(fill="x", padx=20, pady=6)
+        ctk.CTkButton(
+            self, text="📁  Abrir carpeta de la cancion", height=42,
+            command=self._open_folder,
+        ).pack(fill="x", padx=20, pady=6)
+
+        self.msg = ctk.CTkLabel(self, text="", text_color="gray70", wraplength=320)
+        self.msg.pack(pady=(8, 0))
+
+    def _export_mix(self) -> None:
+        default = os.path.join(self.result.song_dir, f"{self.result.song_name}_mezcla.wav")
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Guardar mezcla", defaultextension=".wav",
+            initialfile=os.path.basename(default), initialdir=self.result.song_dir,
+            filetypes=[("WAV", "*.wav")],
+        )
+        if not path:
+            return
+        try:
+            self.player.render_mix(path)
+            self.msg.configure(text=f"Mezcla guardada:\n{os.path.basename(path)}")
+        except Exception as exc:  # noqa: BLE001
+            self.msg.configure(text=f"Error: {exc}")
+
+    def _export_pdf(self) -> None:
+        if os.path.isfile(self.result.score_pdf):
+            _open_path(self.result.score_pdf)
+            self.msg.configure(text="Abriendo PDF...")
+        else:
+            self.msg.configure(text="No se encontro el PDF.")
+
+    def _open_folder(self) -> None:
+        _open_path(self.result.song_dir)
+        self.msg.configure(text="Abriendo carpeta...")
 
 
 def launch() -> None:
