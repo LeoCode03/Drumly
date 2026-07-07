@@ -72,8 +72,10 @@ pip install git+https://github.com/xavriley/ADTOF-pytorch.git
 
 ### 3. Instalar LilyPond (¡imprescindible para el PDF!)
 
-- **Windows:** descargar el instalador desde <https://lilypond.org/download.html> y
-  añadir la carpeta `bin` de LilyPond al `PATH`.
+- **Windows:** `winget install LilyPond.LilyPond` (recomendado, versión estable
+  2.24), o descargar desde <https://lilypond.org/download.html>. Si tienes una
+  instalación que no arranca, define la variable `DRUMLY_LILYPOND` con la ruta a un
+  `lilypond.exe` que funcione, o desinstala la rota.
 - **macOS:** `brew install lilypond` (o el binario de <https://lilypond.org/macos-x.html>).
 - **Linux (Debian/Ubuntu):** `sudo apt install lilypond`
 

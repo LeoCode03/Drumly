@@ -16,6 +16,7 @@ percusion de music21.
 
 from __future__ import annotations
 
+import glob
 import os
 import shutil
 import subprocess
@@ -76,21 +77,72 @@ def extract_drum_events(midi_path: str) -> tuple[List[tuple[float, str]], float]
     return events, duration
 
 
-def _resolve_lilypond() -> str:
-    """Devuelve la ruta al ejecutable de LilyPond o lanza un error claro."""
-    lily = shutil.which("lilypond")
-    if lily:
-        return lily
-    # Rutas habituales en Windows si no esta en el PATH
-    for guess in (
+def _lilypond_candidates() -> List[str]:
+    """Rutas candidatas a lilypond, en orden de preferencia (sin duplicados)."""
+    cands: List[str] = []
+
+    env = os.environ.get("DRUMLY_LILYPOND") or os.environ.get("LILYPOND_PATH")
+    if env:
+        cands.append(env)
+
+    which = shutil.which("lilypond")
+    if which:
+        cands.append(which)
+
+    cands += [
         r"C:\Program Files\lilypond\bin\lilypond.exe",
         r"C:\Program Files (x86)\lilypond\bin\lilypond.exe",
-    ):
-        if os.path.isfile(guess):
-            return guess
-    raise FileNotFoundError(
-        "No se encontro 'lilypond'. Instalalo y agregalo al PATH "
-        "(ver README.md). Windows: https://lilypond.org/download.html"
+        r"C:\LilyPond\bin\lilypond.exe",
+    ]
+    localapp = os.environ.get("LOCALAPPDATA", "")
+    if localapp:
+        cands += glob.glob(
+            os.path.join(localapp, "Microsoft", "WinGet", "Packages",
+                         "LilyPond.LilyPond*", "**", "lilypond.exe"),
+            recursive=True,
+        )
+    cands += glob.glob(r"C:\Program Files\LilyPond*\**\lilypond.exe", recursive=True)
+
+    seen: set[str] = set()
+    out: List[str] = []
+    for c in cands:
+        if c and c not in seen and os.path.isfile(c):
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def _lilypond_runs(path: str) -> bool:
+    """True si ese lilypond.exe arranca de verdad (--version devuelve 0)."""
+    try:
+        r = subprocess.run(
+            [path, "--version"], capture_output=True, text=True, timeout=30
+        )
+        return r.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _resolve_lilypond() -> str:
+    """
+    Devuelve un lilypond que REALMENTE arranca. Prueba varias rutas y verifica
+    cada una con --version, para no quedarse con una instalacion danada que este
+    en el PATH. Da un error claro si ninguna funciona.
+    """
+    candidates = _lilypond_candidates()
+    if not candidates:
+        raise FileNotFoundError(
+            "No se encontro 'lilypond'. Instalalo y agregalo al PATH "
+            "(ver README.md). Windows: https://lilypond.org/download.html"
+        )
+    for path in candidates:
+        if _lilypond_runs(path):
+            return path
+    raise RuntimeError(
+        "LilyPond esta instalado pero no arranca (instalacion danada o bloqueada). "
+        "Rutas probadas: " + " | ".join(candidates) + ".\n"
+        "Reinstalalo (ver README.md) o define la variable de entorno "
+        "DRUMLY_LILYPOND con la ruta a un lilypond.exe que funcione."
     )
 
 
@@ -266,9 +318,17 @@ def midi_to_pdf(
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            "LilyPond fallo al generar el PDF:\n" + (result.stderr or result.stdout)
-        )
+        detail = (result.stderr or result.stdout or "").strip()
+        msg = f"LilyPond fallo al generar el PDF (codigo {result.returncode})."
+        if not detail:
+            msg += (
+                "\nLilyPond no devolvio ningun mensaje: normalmente significa que su "
+                "instalacion esta danada/bloqueada y no arranca. Reinstala LilyPond "
+                "(ver README.md) o define DRUMLY_LILYPOND con un lilypond.exe que funcione."
+            )
+        else:
+            msg += "\n" + detail
+        raise RuntimeError(msg)
 
     pdf_path = out_base + ".pdf"
     if not os.path.isfile(pdf_path):
