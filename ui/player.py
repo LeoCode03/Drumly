@@ -189,3 +189,118 @@ def _pad(arr: np.ndarray, n: int) -> np.ndarray:
         return arr[:n]
     pad = np.zeros((n - len(arr), arr.shape[1]), dtype=arr.dtype)
     return np.concatenate([arr, pad], axis=0)
+
+
+class SingleTrackPlayer:
+    """
+    Reproduce un unico buffer de audio (numpy, mono float32) con play/pausa/seek.
+    Lo usa la vista de practica, donde el buffer es la bateria ya estirada al
+    tempo elegido. El buffer se puede reemplazar en caliente con set_buffer().
+    """
+
+    def __init__(self) -> None:
+        self._buf: Optional[np.ndarray] = None  # shape [n, 1]
+        self.samplerate: int = 22050
+        self._pos: int = 0
+        self._total: int = 0
+        self._stream = None
+        self._lock = threading.Lock()
+        self._finished = False
+
+    def set_buffer(self, mono: np.ndarray, samplerate: int, keep_fraction: float = 0.0) -> None:
+        """Carga/reemplaza el buffer. `keep_fraction` reposiciona (0..1)."""
+        mono = np.asarray(mono, dtype="float32").reshape(-1, 1)
+        with self._lock:
+            self._buf = mono
+            self.samplerate = samplerate
+            self._total = len(mono)
+            self._pos = int(min(max(keep_fraction, 0.0), 1.0) * self._total)
+            self._finished = False
+
+    @property
+    def loaded(self) -> bool:
+        return self._buf is not None and self._total > 0
+
+    @property
+    def available(self) -> bool:
+        return sd is not None
+
+    def duration(self) -> float:
+        return self._total / self.samplerate if self._total else 0.0
+
+    def position(self) -> float:
+        with self._lock:
+            return self._pos / self.samplerate if self._total else 0.0
+
+    def fraction(self) -> float:
+        with self._lock:
+            return self._pos / self._total if self._total else 0.0
+
+    def seek_fraction(self, frac: float) -> None:
+        frac = min(max(frac, 0.0), 1.0)
+        with self._lock:
+            self._pos = int(frac * self._total)
+            self._finished = False
+
+    @property
+    def is_playing(self) -> bool:
+        return self._stream is not None and self._stream.active
+
+    @property
+    def finished(self) -> bool:
+        return self._finished
+
+    def _callback(self, outdata, frames, time_info, status) -> None:  # noqa: ANN001
+        with self._lock:
+            start = self._pos
+            end = min(start + frames, self._total)
+            chunk = self._buf[start:end]
+            self._pos = end
+            done = end >= self._total
+        if len(chunk) < frames:
+            out = np.zeros((frames, 1), dtype="float32")
+            out[: len(chunk)] = chunk
+            outdata[:] = out
+            self._finished = True
+            raise sd.CallbackStop()
+        outdata[:] = chunk
+        if done:
+            self._finished = True
+            raise sd.CallbackStop()
+
+    def play(self) -> None:
+        if not self.loaded:
+            return
+        if sd is None:
+            raise RuntimeError("No hay backend de audio (sounddevice/PortAudio).")
+        self._close_stream()
+        with self._lock:
+            if self._pos >= self._total:
+                self._pos = 0
+            self._finished = False
+        self._stream = sd.OutputStream(
+            samplerate=self.samplerate, channels=1, dtype="float32",
+            callback=self._callback,
+        )
+        self._stream.start()
+
+    def pause(self) -> None:
+        self._close_stream()
+
+    def stop(self) -> None:
+        self._close_stream()
+        with self._lock:
+            self._pos = 0
+            self._finished = False
+
+    def _close_stream(self) -> None:
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._stream = None
+
+    def close(self) -> None:
+        self._close_stream()

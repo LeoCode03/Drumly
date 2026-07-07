@@ -24,6 +24,7 @@ from tkinter import filedialog
 
 from pipeline import PipelineResult, run_pipeline
 from ui.player import DualTrackPlayer
+from ui.practice import PracticeWindow
 
 OUTPUT_DIR = os.path.abspath("output")
 
@@ -191,6 +192,14 @@ class DrumlyApp(ctk.CTk):
         ctk.CTkLabel(pdf_box, text="Partitura", text_color="gray70",
                      font=ctk.CTkFont(size=12)).pack()
 
+        # --- Practicar en tiempo real ---
+        self.practice_btn = ctk.CTkButton(
+            f, text="🎯  Practicar en tiempo real", command=self._on_practice,
+            height=44, corner_radius=22, fg_color="#243b52", hover_color="#2d4a68",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        )
+        self.practice_btn.pack(fill="x", pady=(0, 8))
+
         # --- Export ---
         self.export_btn = ctk.CTkButton(
             f, text="Export", command=self._on_export, height=48,
@@ -285,6 +294,18 @@ class DrumlyApp(ctk.CTk):
         if not self._result:
             return
         ExportDialog(self, self._result, self.player)
+
+    def _on_practice(self) -> None:
+        if not self._result:
+            return
+        # La practica reproduce solo bateria: pausamos el mezclador para no solapar.
+        self.player.pause()
+        self.play_btn.configure(text="▶")
+        win = PracticeWindow(
+            self, self._result.drums_mid, self._result.drums_wav,
+            self._result.bpm, self._result.song_name,
+        )
+        win.focus()
 
     # ----------------------------------------------------------- worker / UI
     def _run_worker(self) -> None:

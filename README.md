@@ -103,6 +103,18 @@ python main.py
    - Botón 📄 para abrir la **partitura PDF**.
    - **Export** → guardar la *mezcla de audio* (con tus volúmenes), abrir el *PDF*
      o abrir la *carpeta* de la canción.
+5. Botón **🎯 Practicar en tiempo real** → abre una vista que reproduce la batería
+   y muestra la partitura con un **cursor** que la sigue. Puedes **cambiar el BPM**
+   con el slider: la batería se **estira al tempo elegido sin cambiar el tono** y el
+   cursor sigue sincronizado. Incluye **metrónomo** opcional. (El PDF de descarga
+   no cambia; esto es solo para practicar.)
+
+## Acceso directo
+
+Se incluye `run_drumly.bat` (doble clic para lanzar, con consola para ver errores).
+En Windows también puedes crear un acceso directo en el escritorio que apunte a
+`.venv\Scripts\pythonw.exe` con argumento `main.py` y carpeta de trabajo el
+proyecto (así se lanza sin ventana de consola).
 
 Los archivos se guardan en `output/` con el nombre de la canción:
 `cancion_drums.wav`, `cancion_drums.mid`, `cancion_partitura.pdf`.

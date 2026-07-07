@@ -45,6 +45,36 @@ GM_DRUM_TO_LILY: Dict[int, str] = {
 GRID = 0.25          # rejilla de cuantizacion en negras (0.25 = semicorchea)
 SLOTS_PER_MEASURE = 16  # 4/4 con rejilla de semicorcheas
 
+# Categoria de cada nota GM, para la vista de practica en pentagrama.
+GM_DRUM_TO_CATEGORY: Dict[int, str] = {
+    35: "kick", 36: "kick",
+    37: "snare", 38: "snare", 40: "snare",
+    42: "hihat", 44: "hihat", 46: "hihat",
+    49: "cymbal", 51: "cymbal", 53: "cymbal", 55: "cymbal", 57: "cymbal", 59: "cymbal",
+    41: "tom", 43: "tom", 45: "tom", 47: "tom", 48: "tom", 50: "tom",
+}
+
+
+def extract_drum_events(midi_path: str) -> tuple[List[tuple[float, str]], float]:
+    """
+    Para la vista de practica en tiempo real. Devuelve:
+      - eventos: lista de (onset_en_segundos, categoria) ordenada por tiempo
+      - duracion en segundos
+
+    Se trabaja en SEGUNDOS reales del audio (pretty_midi guarda note.start en
+    segundos), asi el cursor -que sigue el audio- cae exactamente sobre las notas.
+    """
+    pm = pretty_midi.PrettyMIDI(midi_path)
+    events: List[tuple[float, str]] = []
+    for inst in pm.instruments:
+        for note in inst.notes:
+            category = GM_DRUM_TO_CATEGORY.get(int(note.pitch))
+            if category is not None:
+                events.append((float(note.start), category))
+    events.sort(key=lambda e: e[0])
+    duration = float(pm.get_end_time()) if events else 0.0
+    return events, duration
+
 
 def _resolve_lilypond() -> str:
     """Devuelve la ruta al ejecutable de LilyPond o lanza un error claro."""
