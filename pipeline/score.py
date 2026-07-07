@@ -44,7 +44,6 @@ GM_DRUM_TO_LILY: Dict[int, str] = {
 }
 
 GRID = 0.25          # rejilla de cuantizacion en negras (0.25 = semicorchea)
-SLOTS_PER_MEASURE = 16  # 4/4 con rejilla de semicorcheas
 
 # Categoria de cada nota GM, para la vista de practica en pentagrama.
 GM_DRUM_TO_CATEGORY: Dict[int, str] = {
@@ -189,26 +188,31 @@ def _hit_token(hits: Set[str]) -> str:
     return "<" + " ".join(sorted(hits)) + ">16"
 
 
+# Duracion(es) de silencio/skip que llenan un compas entero segun negras/compas.
+_WHOLE_MEASURE_REST = {2: ["2"], 3: ["2."], 4: ["1"], 5: ["1", "4"], 6: ["1."]}
+
+
 def _measure_tokens(
-    grid: Dict[int, Set[str]], measure: int, rest_char: str = "r"
+    grid: Dict[int, Set[str]], measure: int, beats_per_bar: int = 4, rest_char: str = "r"
 ) -> List[str]:
     """
-    Tokens de un compas 4/4, agrupando los silencios para que sea legible:
-      - compas entero en silencio  -> redonda
+    Tokens de un compas (N/4), agrupando los silencios para que sea legible:
+      - compas entero en silencio  -> un solo silencio (redonda/blanca con puntillo…)
       - tiempo (negra) en silencio  -> negra
       - medio tiempo en silencio    -> corchea
       - resto                       -> notas/silencios de semicorchea (16)
     Las notas se mantienen en semicorcheas; solo se fusionan los silencios.
 
-    `rest_char` es 'r' para silencios visibles o 's' (skip) para tiempo invisible
-    que ocupa el compas sin imprimir ningun simbolo.
+    `rest_char` es 'r' para silencios visibles o 's' (skip) para tiempo invisible.
     """
-    base = measure * SLOTS_PER_MEASURE
-    if all(grid.get(base + i) is None for i in range(SLOTS_PER_MEASURE)):
-        return [f"{rest_char}1"]
+    slots_per_measure = beats_per_bar * 4  # 4 semicorcheas por negra
+    base = measure * slots_per_measure
+    if all(grid.get(base + i) is None for i in range(slots_per_measure)):
+        durs = _WHOLE_MEASURE_REST.get(beats_per_bar, ["4"] * beats_per_bar)
+        return [f"{rest_char}{d}" for d in durs]
 
     tokens: List[str] = []
-    for beat in range(4):  # 4 negras por compas
+    for beat in range(beats_per_bar):
         b = base + beat * 4
         beat_slots = [grid.get(b + i) for i in range(4)]
         if all(s is None for s in beat_slots):
@@ -226,9 +230,11 @@ def _measure_tokens(
     return tokens
 
 
-def _grid_to_drummode(grid: Dict[int, Set[str]], show_rests: bool = True) -> str:
+def _grid_to_drummode(
+    grid: Dict[int, Set[str]], beats_per_bar: int = 4, show_rests: bool = True
+) -> str:
     """
-    Convierte la rejilla en tokens \\drummode, compas por compas.
+    Convierte la rejilla en tokens \\drummode, compas por compas (N/4).
 
     Si `show_rests` es False se usan 'skips' (s) en vez de silencios (r): el
     tiempo se respeta pero no se imprime ningun simbolo de silencio, asi que solo
@@ -241,17 +247,20 @@ def _grid_to_drummode(grid: Dict[int, Set[str]], show_rests: bool = True) -> str
         )
 
     rest_char = "r" if show_rests else "s"
+    slots_per_measure = beats_per_bar * 4
     last_slot = max(grid)
-    num_measures = last_slot // SLOTS_PER_MEASURE + 1
+    num_measures = last_slot // slots_per_measure + 1
 
     lines: List[str] = []
     for m in range(num_measures):
-        tokens = _measure_tokens(grid, m, rest_char=rest_char)
+        tokens = _measure_tokens(grid, m, beats_per_bar=beats_per_bar, rest_char=rest_char)
         lines.append("  " + " ".join(tokens) + " |")
     return "\n".join(lines)
 
 
-def _write_lilypond(drummode: str, tempo: float, title: str, ly_path: str) -> None:
+def _write_lilypond(
+    drummode: str, tempo: float, title: str, ly_path: str, beats_per_bar: int = 4
+) -> None:
     """Escribe el archivo .ly completo en disco."""
     content = f"""\\version "2.24.0"
 
@@ -265,7 +274,7 @@ def _write_lilypond(drummode: str, tempo: float, title: str, ly_path: str) -> No
   \\new DrumStaff {{
     \\drummode {{
       \\tempo 4 = {int(round(tempo))}
-      \\time 4/4
+      \\time {beats_per_bar}/4
 {drummode}
     }}
   }}
@@ -281,12 +290,14 @@ def midi_to_pdf(
     output_pdf_path: str,
     progress: Optional[Callable[[str], None]] = None,
     show_rests: bool = True,
+    beats_per_bar: int = 4,
 ) -> str:
     """
     Convierte `midi_path` en una partitura PDF guardada en `output_pdf_path`.
 
     `progress` es un callback opcional para reportar el estado (lo usa la UI).
     `show_rests`: si es False, oculta los silencios y solo muestra las notas tocadas.
+    `beats_per_bar`: negras por compas (4 -> 4/4, 3 -> 3/4, ...).
     Devuelve la ruta del PDF generado.
     """
     def report(msg: str) -> None:
@@ -300,7 +311,7 @@ def midi_to_pdf(
 
     report("Cuantizando golpes...")
     grid = _build_grid(events)
-    drummode = _grid_to_drummode(grid, show_rests=show_rests)
+    drummode = _grid_to_drummode(grid, beats_per_bar=beats_per_bar, show_rests=show_rests)
 
     title = os.path.splitext(os.path.basename(output_pdf_path))[0]
     out_dir = os.path.dirname(os.path.abspath(output_pdf_path))
@@ -309,7 +320,7 @@ def midi_to_pdf(
     # LilyPond decide la extension: usamos el nombre SIN extension como salida.
     out_base = os.path.splitext(os.path.abspath(output_pdf_path))[0]
     ly_path = out_base + ".ly"
-    _write_lilypond(drummode, tempo, title, ly_path)
+    _write_lilypond(drummode, tempo, title, ly_path, beats_per_bar=beats_per_bar)
 
     report("Generando partitura con LilyPond...")
     result = subprocess.run(

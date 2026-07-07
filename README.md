@@ -105,11 +105,15 @@ python main.py
    - Botón 📄 para abrir la **partitura PDF**.
    - **Export** → guardar la *mezcla de audio* (con tus volúmenes), abrir el *PDF*
      o abrir la *carpeta* de la canción.
-5. Botón **🎯 Practicar en tiempo real** → abre una vista que reproduce la batería
-   y muestra la partitura con un **cursor** que la sigue. Puedes **cambiar el BPM**
-   con el slider: la batería se **estira al tempo elegido sin cambiar el tono** y el
-   cursor sigue sincronizado. Incluye **metrónomo** opcional. (El PDF de descarga
-   no cambia; esto es solo para practicar.)
+5. Botón **🎯 Practicar en tiempo real** → abre una vista grande con la partitura y
+   un **cursor** que la sigue mientras suena la batería:
+   - **BPM** y **compás** (2/4, 3/4, 4/4) detectados; ambos se pueden **cambiar**.
+   - Al cambiar el BPM, la batería se **estira al tempo elegido sin cambiar el tono**
+     y el cursor sigue sincronizado.
+   - **Retroceder/avanzar** en tiempo real: barra de progreso o **clic en la partitura**.
+   - **Metrónomo** opcional.
+   (El PDF de descarga no cambia; esto es solo para practicar. El compás detectado sí
+   se usa para notar el PDF en 3/4, 4/4, etc.)
 
 ## Acceso directo
 

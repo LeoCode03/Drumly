@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .analyze import estimate_bpm
+from .analyze import estimate_tempo_and_meter
 from .score import midi_to_pdf
 from .separator import separate
 from .transcriber import transcribe
@@ -40,6 +40,12 @@ class PipelineResult:
     drums_mid: str
     score_pdf: str
     bpm: Optional[int]
+    beats_per_bar: int = 4
+
+    @property
+    def meter(self) -> str:
+        """Compas como texto, p. ej. '4/4'."""
+        return f"{self.beats_per_bar}/4"
 
 
 def run_pipeline(
@@ -70,12 +76,15 @@ def run_pipeline(
     separate(audio_path, drums_wav, no_drums_wav, progress=progress)
     # 2. Transcripcion a MIDI
     transcribe(drums_wav, drums_mid, progress=progress)
-    # 3. Partitura PDF
-    score_pdf = midi_to_pdf(drums_mid, score_pdf, progress=progress, show_rests=show_rests)
-    # 4. BPM (informativo)
+    # 3. BPM + compas (antes del PDF, para notarlo en el compas correcto)
     if progress:
-        progress("Estimando BPM...")
-    bpm = estimate_bpm(drums_wav)
+        progress("Estimando BPM y compas...")
+    bpm, beats_per_bar = estimate_tempo_and_meter(drums_wav)
+    # 4. Partitura PDF (en el compas detectado)
+    score_pdf = midi_to_pdf(
+        drums_mid, score_pdf, progress=progress,
+        show_rests=show_rests, beats_per_bar=beats_per_bar,
+    )
 
     return PipelineResult(
         song_name=stem,
@@ -85,4 +94,5 @@ def run_pipeline(
         drums_mid=drums_mid,
         score_pdf=score_pdf,
         bpm=bpm,
+        beats_per_bar=beats_per_bar,
     )

@@ -304,6 +304,7 @@ class DrumlyApp(ctk.CTk):
         win = PracticeWindow(
             self, self._result.drums_mid, self._result.drums_wav,
             self._result.bpm, self._result.song_name,
+            beats_per_bar=self._result.beats_per_bar,
         )
         win.focus()
 
@@ -348,9 +349,8 @@ class DrumlyApp(ctk.CTk):
             self.mixer_msg.configure(text=f"Audio no disponible: {exc}")
 
         self.song_title.configure(text=result.song_name)
-        self.bpm_label.configure(
-            text=(f"{result.bpm} BPM" if result.bpm else "-- BPM")
-        )
+        bpm_txt = f"{result.bpm} BPM" if result.bpm else "-- BPM"
+        self.bpm_label.configure(text=f"{bpm_txt} · {result.meter}")
         self.time_total.configure(text=_fmt_time(self.player.duration()))
         self.time_cur.configure(text="00:00")
         self.seek.set(0)
