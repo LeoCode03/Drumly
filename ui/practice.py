@@ -46,20 +46,38 @@ def _fmt_time(seconds: float) -> str:
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
-def _make_click_track(n_frames: int, sr: int, bpm: float) -> np.ndarray:
-    """Click de metronomo (mono) cada negra al tempo `bpm`."""
+def _click_wave(sr: int, freq: float, gain: float) -> np.ndarray:
+    click_len = int(sr * 0.03)
+    t = np.linspace(0, 0.03, click_len, endpoint=False)
+    return (gain * np.sin(2 * np.pi * freq * t) * np.exp(-t * 60)).astype("float32")
+
+
+def _make_click_track(
+    n_frames: int, sr: int, bpm: float, beats_per_bar: int = 4, accent: bool = False,
+) -> np.ndarray:
+    """
+    Click de metronomo (mono) cada negra al tempo `bpm`.
+
+    Si `accent` es True, el primer tiempo de cada compas (negras/compas =
+    `beats_per_bar`) suena mas fuerte y con un tono distinto (mas agudo), como
+    guia del inicio de cada compas.
+    """
     track = np.zeros(n_frames, dtype="float32")
     if bpm <= 0 or n_frames <= 0:
         return track
     interval = int(sr * 60.0 / bpm)
     if interval <= 0:
         return track
-    click_len = int(sr * 0.03)
-    t = np.linspace(0, 0.03, click_len, endpoint=False)
-    click = (0.5 * np.sin(2 * np.pi * 1200 * t) * np.exp(-t * 60)).astype("float32")
+
+    click_normal = _click_wave(sr, 1200, 0.5)
+    click_accent = _click_wave(sr, 1800, 0.9) if accent else click_normal
+
+    beat = 0
     for start in range(0, n_frames, interval):
-        end = min(start + click_len, n_frames)
+        click = click_accent if (accent and beat % beats_per_bar == 0) else click_normal
+        end = min(start + len(click), n_frames)
         track[start:end] += click[: end - start]
+        beat += 1
     return track
 
 
@@ -97,6 +115,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self._orig_sr = _PRACTICE_SR
         self._orig_duration = 0.0
         self._metronome = ctk.BooleanVar(value=False)
+        self._metronome_accent = ctk.BooleanVar(value=True)
         self._busy = False
         self._user_seeking = False
 
@@ -195,6 +214,10 @@ class PracticeWindow(ctk.CTkToplevel):
             right, text="Metronomo", variable=self._metronome,
             command=self._on_metronome_toggle,
         ).pack(anchor="e", pady=(10, 0))
+        ctk.CTkCheckBox(
+            right, text="Acentuar 1er tiempo", variable=self._metronome_accent,
+            command=self._on_metronome_accent_toggle,
+        ).pack(anchor="e", pady=(4, 0))
 
         self.status = ctk.CTkLabel(self, text="", text_color="gray60")
         self.status.grid(row=5, column=0, pady=(0, 8))
@@ -252,7 +275,10 @@ class PracticeWindow(ctk.CTkToplevel):
         drums = _stretch(self._orig_drums, rate)
         others = _stretch(self._orig_others, rate)
         n = max(len(drums), len(others))
-        click = _make_click_track(n, self._orig_sr, self.target_bpm)
+        click = _make_click_track(
+            n, self._orig_sr, self.target_bpm,
+            beats_per_bar=self.beats_per_bar, accent=self._metronome_accent.get(),
+        )
         self.player.set_tracks(
             [drums, others, click], self._orig_sr,
             gains=self._current_gains(), keep_fraction=keep_fraction,
@@ -317,10 +343,15 @@ class PracticeWindow(ctk.CTkToplevel):
     def _on_meter_change(self, value: str) -> None:
         self.beats_per_bar = int(value.split("/")[0])
         self.score.set_grid(int(self.bpm0), self.beats_per_bar)
+        # El patron de acento del click depende del compas: regenerarlo.
+        self._apply_tempo_async()
 
     def _on_metronome_toggle(self) -> None:
         # El click ya esta como pista aparte: solo cambiamos su volumen en vivo.
         self.player.set_gain(_T_CLICK, 1.0 if self._metronome.get() else 0.0)
+
+    def _on_metronome_accent_toggle(self) -> None:
+        self._apply_tempo_async()
 
     def _on_play_pause(self) -> None:
         if not self.player.loaded:
