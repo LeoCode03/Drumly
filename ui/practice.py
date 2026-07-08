@@ -1,40 +1,44 @@
 """
-practice.py — Ventana "Practicar": reproduce la bateria y sigue la partitura en
-tiempo real con un cursor, al BPM (y compas) que elijas.
+practice.py — Ventana "Practicar": reproduce la bateria (y opcionalmente el resto
+de la mezcla) y sigue la partitura en tiempo real con un cursor, al BPM/compas que
+elijas.
 
 Modo A+B:
   - BPM y compas detectados se muestran y se pueden cambiar.
-  - Al cambiar el BPM, la bateria se estira al nuevo tempo SIN cambiar el tono
-    (librosa.effects.time_stretch) y el cursor la sigue sincronizado.
-  - Se puede retroceder/avanzar en tiempo real: barra de progreso + clic sobre la
-    partitura.
-  - Metronomo opcional.
+  - Al cambiar el BPM, las pistas se estiran al nuevo tempo SIN cambiar el tono
+    (librosa.effects.time_stretch) y el cursor las sigue sincronizado.
+  - Se mezclan DOS pistas con volumen independiente en vivo: Bateria y "Otros"
+    (sin bateria), para poder guiarse con voces/instrumentos. Los volumenes
+    iniciales vienen del mezclador del panel principal.
+  - Retroceder/avanzar en tiempo real: barra de progreso + clic en la partitura.
+  - Metronomo opcional (pista de click aparte).
 
-Layout: la partitura ocupa casi toda la ventana; los controles van abajo,
-distribuidos de forma simetrica (BPM a la izquierda, Play al centro, compas y
-metronomo a la derecha).
+Layout: la partitura ocupa el centro; controles abajo, simetricos.
 
 Sincronia: el lienzo dibuja las notas por segundos reales del audio original; el
-cursor se calcula desde la posicion del audio estirado -> siempre caen juntos.
-La fraccion de avance es invariante al tempo (se conserva al re-estirar).
+cursor se calcula desde la posicion reproducida -> siempre caen juntos. La fraccion
+de avance es invariante al tempo (se conserva al re-estirar).
 """
 
 from __future__ import annotations
 
 import threading
-from typing import Optional
+from typing import List, Optional
 
 import customtkinter as ctk
 import numpy as np
 
 from pipeline.score import extract_drum_events
-from ui.player import SingleTrackPlayer
+from ui.player import MixPlayer
 from ui.score_view import ScoreCanvas
 
 ACCENT = "#1db954"
 ACCENT_HOVER = "#17a347"
 _PRACTICE_SR = 22050
 _METERS = ["2/4", "3/4", "4/4"]
+
+# Indices de pista en el MixPlayer
+_T_DRUMS, _T_OTHERS, _T_CLICK = 0, 1, 2
 
 
 def _fmt_time(seconds: float) -> str:
@@ -45,42 +49,58 @@ def _fmt_time(seconds: float) -> str:
 def _make_click_track(n_frames: int, sr: int, bpm: float) -> np.ndarray:
     """Click de metronomo (mono) cada negra al tempo `bpm`."""
     track = np.zeros(n_frames, dtype="float32")
-    if bpm <= 0:
+    if bpm <= 0 or n_frames <= 0:
         return track
     interval = int(sr * 60.0 / bpm)
     if interval <= 0:
         return track
     click_len = int(sr * 0.03)
     t = np.linspace(0, 0.03, click_len, endpoint=False)
-    click = (0.35 * np.sin(2 * np.pi * 1200 * t) * np.exp(-t * 60)).astype("float32")
+    click = (0.5 * np.sin(2 * np.pi * 1200 * t) * np.exp(-t * 60)).astype("float32")
     for start in range(0, n_frames, interval):
         end = min(start + click_len, n_frames)
         track[start:end] += click[: end - start]
     return track
 
 
+def _stretch(y: np.ndarray, rate: float) -> np.ndarray:
+    if abs(rate - 1.0) < 1e-3:
+        return y.copy()
+    import librosa
+    return librosa.effects.time_stretch(y, rate=rate).astype("float32")
+
+
 class PracticeWindow(ctk.CTkToplevel):
     def __init__(self, master, midi_path: str, drums_wav: str,
-                 bpm: Optional[int], song_name: str, beats_per_bar: int = 4) -> None:
+                 bpm: Optional[int], song_name: str, beats_per_bar: int = 4,
+                 no_drums_wav: Optional[str] = None,
+                 drums_gain: float = 1.0, no_drums_gain: float = 1.0) -> None:
         super().__init__(master)
         self.title(f"Practicar — {song_name}")
-        self.geometry("1100x680")
-        self.minsize(820, 540)
+        self.geometry("1100x700")
+        self.minsize(820, 560)
 
         self._midi_path = midi_path
         self._drums_wav = drums_wav
+        self._no_drums_wav = no_drums_wav
         self.bpm0 = float(bpm) if bpm else 120.0
-        self.target_bpm = self.bpm0
+        self.target_bpm = self.bpm0     # tempo pedido por el slider
+        self.rendered_bpm = self.bpm0   # tempo al que esta ESTIRADO el audio actual
+        self._bpm_after = None          # id del re-render con debounce
         self.beats_per_bar = beats_per_bar if beats_per_bar in (2, 3, 4) else 4
 
-        self._orig: Optional[np.ndarray] = None
+        self.gain_drums = float(drums_gain)
+        self.gain_others = float(no_drums_gain)
+
+        self._orig_drums: Optional[np.ndarray] = None
+        self._orig_others: Optional[np.ndarray] = None
         self._orig_sr = _PRACTICE_SR
         self._orig_duration = 0.0
         self._metronome = ctk.BooleanVar(value=False)
         self._busy = False
         self._user_seeking = False
 
-        self.player = SingleTrackPlayer()
+        self.player = MixPlayer()
 
         self._build_widgets()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -94,7 +114,6 @@ class PracticeWindow(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)  # la partitura se estira
 
-        # --- Encabezado ---
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
         ctk.CTkLabel(
@@ -106,14 +125,21 @@ class PracticeWindow(ctk.CTkToplevel):
             text_color="gray60",
         ).pack(side="right")
 
-        # --- Partitura (ocupa el espacio central) ---
         self.score = ScoreCanvas(self, fg_color="transparent")
         self.score.grid(row=1, column=0, sticky="nsew", padx=16, pady=6)
         self.score.set_seek_callback(self._seek_seconds)
 
+        # --- Volumen de pistas (mezcla) ---
+        vol = ctk.CTkFrame(self, fg_color="transparent")
+        vol.grid(row=2, column=0, sticky="ew", padx=16, pady=(2, 0))
+        vol.grid_columnconfigure(0, weight=1, uniform="vol")
+        vol.grid_columnconfigure(1, weight=1, uniform="vol")
+        self._build_vol_slider(vol, 0, "🥁 Bateria", self.gain_drums, self._on_vol_drums)
+        self._build_vol_slider(vol, 1, "🎵 Otros", self.gain_others, self._on_vol_others)
+
         # --- Barra de progreso + tiempos ---
         seekbox = ctk.CTkFrame(self, fg_color="transparent")
-        seekbox.grid(row=2, column=0, sticky="ew", padx=16, pady=(4, 0))
+        seekbox.grid(row=3, column=0, sticky="ew", padx=16, pady=(6, 0))
         seekbox.grid_columnconfigure(1, weight=1)
         self.time_cur = ctk.CTkLabel(seekbox, text="00:00", text_color="gray70", width=52)
         self.time_cur.grid(row=0, column=0)
@@ -127,12 +153,11 @@ class PracticeWindow(ctk.CTkToplevel):
 
         # --- Controles (abajo, simetricos: BPM | Play | Compas/Metronomo) ---
         controls = ctk.CTkFrame(self, fg_color="transparent")
-        controls.grid(row=3, column=0, sticky="ew", padx=16, pady=(8, 14))
+        controls.grid(row=4, column=0, sticky="ew", padx=16, pady=(8, 12))
         controls.grid_columnconfigure(0, weight=1, uniform="ctl")
         controls.grid_columnconfigure(1, weight=0)
         controls.grid_columnconfigure(2, weight=1, uniform="ctl")
 
-        # Izquierda: BPM
         left = ctk.CTkFrame(controls, fg_color="transparent")
         left.grid(row=0, column=0, sticky="ew", padx=(0, 12))
         row1 = ctk.CTkFrame(left, fg_color="transparent")
@@ -149,7 +174,6 @@ class PracticeWindow(ctk.CTkToplevel):
         self.bpm_slider.pack(fill="x", pady=(4, 4))
         ctk.CTkButton(left, text="Reset tempo", height=26, command=self._reset_bpm).pack()
 
-        # Centro: Play
         self.play_btn = ctk.CTkButton(
             controls, text="▶", width=72, height=72, corner_radius=36,
             command=self._on_play_pause, font=ctk.CTkFont(size=26),
@@ -157,7 +181,6 @@ class PracticeWindow(ctk.CTkToplevel):
         )
         self.play_btn.grid(row=0, column=1, padx=18)
 
-        # Derecha: Compas + Metronomo
         right = ctk.CTkFrame(controls, fg_color="transparent")
         right.grid(row=0, column=2, sticky="ew", padx=(12, 0))
         mrow = ctk.CTkFrame(right, fg_color="transparent")
@@ -174,7 +197,17 @@ class PracticeWindow(ctk.CTkToplevel):
         ).pack(anchor="e", pady=(10, 0))
 
         self.status = ctk.CTkLabel(self, text="", text_color="gray60")
-        self.status.grid(row=4, column=0, pady=(0, 8))
+        self.status.grid(row=5, column=0, pady=(0, 8))
+
+    def _build_vol_slider(self, parent, col, name, gain, command) -> None:
+        box = ctk.CTkFrame(parent, fg_color="transparent")
+        box.grid(row=0, column=col, sticky="ew", padx=6)
+        ctk.CTkLabel(box, text=name, width=90, anchor="w", text_color="gray80").pack(
+            side="left"
+        )
+        slider = ctk.CTkSlider(box, from_=0, to=150, number_of_steps=150, command=command)
+        slider.set(gain * 100)
+        slider.pack(side="left", fill="x", expand=True, padx=(8, 0))
 
     # ------------------------------------------------------------------ carga
     def _load_worker(self) -> None:
@@ -182,10 +215,17 @@ class PracticeWindow(ctk.CTkToplevel):
             import librosa
 
             events, _dur = extract_drum_events(self._midi_path)
-            y, sr = librosa.load(self._drums_wav, sr=_PRACTICE_SR, mono=True)
-            self._orig = y.astype("float32")
+            drums, sr = librosa.load(self._drums_wav, sr=_PRACTICE_SR, mono=True)
+            others = np.zeros_like(drums)
+            if self._no_drums_wav:
+                try:
+                    others, _ = librosa.load(self._no_drums_wav, sr=_PRACTICE_SR, mono=True)
+                except Exception:  # noqa: BLE001
+                    others = np.zeros_like(drums)
+            self._orig_drums = drums.astype("float32")
+            self._orig_others = others.astype("float32")
             self._orig_sr = sr
-            self._orig_duration = len(y) / sr
+            self._orig_duration = len(drums) / sr
             self.after(0, lambda: self._on_loaded(events))
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
@@ -202,23 +242,26 @@ class PracticeWindow(ctk.CTkToplevel):
         self._set_status("" if self.player.available else "Sin dispositivo de audio.")
 
     # --------------------------------------------------------- tempo / buffer
+    def _current_gains(self) -> List[float]:
+        return [self.gain_drums, self.gain_others,
+                1.0 if self._metronome.get() else 0.0]
+
     def _render_buffer(self, keep_fraction: float) -> None:
-        assert self._orig is not None
+        assert self._orig_drums is not None and self._orig_others is not None
         rate = self.target_bpm / self.bpm0
-        if abs(rate - 1.0) < 1e-3:
-            buf = self._orig.copy()
-        else:
-            import librosa
-            buf = librosa.effects.time_stretch(self._orig, rate=rate).astype("float32")
-        if self._metronome.get():
-            buf = buf + _make_click_track(len(buf), self._orig_sr, self.target_bpm)
-            peak = float(np.max(np.abs(buf))) if buf.size else 0.0
-            if peak > 1.0:
-                buf = buf / peak
-        self.player.set_buffer(buf, self._orig_sr, keep_fraction=keep_fraction)
+        drums = _stretch(self._orig_drums, rate)
+        others = _stretch(self._orig_others, rate)
+        n = max(len(drums), len(others))
+        click = _make_click_track(n, self._orig_sr, self.target_bpm)
+        self.player.set_tracks(
+            [drums, others, click], self._orig_sr,
+            gains=self._current_gains(), keep_fraction=keep_fraction,
+        )
+        # A partir de ahora el audio suena a este tempo: el cursor debe usarlo.
+        self.rendered_bpm = self.target_bpm
 
     def _apply_tempo_async(self) -> None:
-        if self._orig is None or self._busy:
+        if self._orig_drums is None or self._busy:
             return
         self._busy = True
         was_playing = self.player.is_playing
@@ -243,14 +286,27 @@ class PracticeWindow(ctk.CTkToplevel):
         if resume:
             self.player.play()
             self.play_btn.configure(text="⏸")
+        # Si el usuario siguio moviendo el slider durante el re-render, aplicamos
+        # el ultimo tempo pedido.
+        if abs(self.target_bpm - self.rendered_bpm) >= 1.0:
+            self._bpm_after = self.after(80, self._apply_tempo_async)
 
     # ----------------------------------------------------------------- eventos
+    def _on_vol_drums(self, value: float) -> None:
+        self.gain_drums = value / 100.0
+        self.player.set_gain(_T_DRUMS, self.gain_drums)
+
+    def _on_vol_others(self, value: float) -> None:
+        self.gain_others = value / 100.0
+        self.player.set_gain(_T_OTHERS, self.gain_others)
+
     def _on_bpm_slide(self, value: float) -> None:
         self.target_bpm = float(value)
         self.bpm_value.configure(text=f"{int(value)} BPM")
-
-    def _on_bpm_release(self, _event) -> None:
-        self._apply_tempo_async()
+        # Re-render con debounce: al dejar de mover el slider, estira el audio.
+        if self._bpm_after is not None:
+            self.after_cancel(self._bpm_after)
+        self._bpm_after = self.after(350, self._apply_tempo_async)
 
     def _reset_bpm(self) -> None:
         self.target_bpm = self.bpm0
@@ -263,7 +319,8 @@ class PracticeWindow(ctk.CTkToplevel):
         self.score.set_grid(int(self.bpm0), self.beats_per_bar)
 
     def _on_metronome_toggle(self) -> None:
-        self._apply_tempo_async()
+        # El click ya esta como pista aparte: solo cambiamos su volumen en vivo.
+        self.player.set_gain(_T_CLICK, 1.0 if self._metronome.get() else 0.0)
 
     def _on_play_pause(self) -> None:
         if not self.player.loaded:
@@ -278,9 +335,8 @@ class PracticeWindow(ctk.CTkToplevel):
             except Exception as exc:  # noqa: BLE001
                 self._set_status(f"No se pudo reproducir: {exc}")
 
-    # --- seek (retroceder/avanzar) ---
+    # --- seek ---
     def _seek_seconds(self, original_seconds: float) -> None:
-        """Seek desde un clic en la partitura (segundos del audio original)."""
         if self._orig_duration <= 0:
             return
         self.player.seek_fraction(original_seconds / self._orig_duration)
@@ -296,7 +352,9 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _tick(self) -> None:
         if self.player.loaded:
-            orig_sec = self.player.position() * (self.target_bpm / self.bpm0)
+            # El cursor sigue el tempo REAL del audio (rendered_bpm), no el del
+            # slider, para que nunca se desincronice mientras se re-renderiza.
+            orig_sec = self.player.position() * (self.rendered_bpm / self.bpm0)
             self.score.set_cursor_seconds(orig_sec)
             self.time_cur.configure(text=_fmt_time(orig_sec))
             if not self._user_seeking:

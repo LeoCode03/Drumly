@@ -191,15 +191,17 @@ def _pad(arr: np.ndarray, n: int) -> np.ndarray:
     return np.concatenate([arr, pad], axis=0)
 
 
-class SingleTrackPlayer:
+class MixPlayer:
     """
-    Reproduce un unico buffer de audio (numpy, mono float32) con play/pausa/seek.
-    Lo usa la vista de practica, donde el buffer es la bateria ya estirada al
-    tempo elegido. El buffer se puede reemplazar en caliente con set_buffer().
+    Reproduce y MEZCLA varias pistas mono (numpy float32) de igual longitud, con un
+    volumen independiente por pista ajustable en vivo. Lo usa la vista de practica:
+    pista 0 = bateria (estirada al tempo), pista 1 = sin bateria, pista 2 = click de
+    metronomo. Los buffers se pueden reemplazar en caliente con set_tracks().
     """
 
     def __init__(self) -> None:
-        self._buf: Optional[np.ndarray] = None  # shape [n, 1]
+        self._tracks: List[np.ndarray] = []   # cada una [n, 1]
+        self._gains: List[float] = []
         self.samplerate: int = 22050
         self._pos: int = 0
         self._total: int = 0
@@ -207,19 +209,33 @@ class SingleTrackPlayer:
         self._lock = threading.Lock()
         self._finished = False
 
-    def set_buffer(self, mono: np.ndarray, samplerate: int, keep_fraction: float = 0.0) -> None:
-        """Carga/reemplaza el buffer. `keep_fraction` reposiciona (0..1)."""
-        mono = np.asarray(mono, dtype="float32").reshape(-1, 1)
+    def set_tracks(
+        self, buffers: List[np.ndarray], samplerate: int,
+        gains: Optional[List[float]] = None, keep_fraction: float = 0.0,
+    ) -> None:
+        """Carga/reemplaza las pistas (se igualan longitudes con ceros)."""
+        cols = [np.asarray(b, dtype="float32").reshape(-1, 1) for b in buffers]
+        n = max((len(b) for b in cols), default=0)
+        cols = [_pad(b, n) for b in cols]
         with self._lock:
-            self._buf = mono
+            self._tracks = cols
             self.samplerate = samplerate
-            self._total = len(mono)
-            self._pos = int(min(max(keep_fraction, 0.0), 1.0) * self._total)
+            self._total = n
+            if gains is not None:
+                self._gains = [max(0.0, float(g)) for g in gains]
+            if len(self._gains) != len(cols):
+                self._gains = [1.0] * len(cols)
+            self._pos = int(min(max(keep_fraction, 0.0), 1.0) * n)
             self._finished = False
+
+    def set_gain(self, idx: int, value: float) -> None:
+        with self._lock:
+            if 0 <= idx < len(self._gains):
+                self._gains[idx] = max(0.0, float(value))
 
     @property
     def loaded(self) -> bool:
-        return self._buf is not None and self._total > 0
+        return bool(self._tracks) and self._total > 0
 
     @property
     def available(self) -> bool:
@@ -254,17 +270,24 @@ class SingleTrackPlayer:
         with self._lock:
             start = self._pos
             end = min(start + frames, self._total)
-            chunk = self._buf[start:end]
+            tracks = self._tracks
+            gains = list(self._gains)
             self._pos = end
-            done = end >= self._total
-        if len(chunk) < frames:
+        length = end - start
+        mix = np.zeros((length, 1), dtype="float32")
+        for buf, gain in zip(tracks, gains):
+            if gain:
+                mix += buf[start:end] * gain
+        np.clip(mix, -1.0, 1.0, out=mix)
+
+        if length < frames:
             out = np.zeros((frames, 1), dtype="float32")
-            out[: len(chunk)] = chunk
+            out[:length] = mix
             outdata[:] = out
             self._finished = True
             raise sd.CallbackStop()
-        outdata[:] = chunk
-        if done:
+        outdata[:] = mix
+        if end >= self._total:
             self._finished = True
             raise sd.CallbackStop()
 

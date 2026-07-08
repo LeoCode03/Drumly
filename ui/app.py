@@ -22,7 +22,9 @@ from typing import Optional
 import customtkinter as ctk
 from tkinter import filedialog
 
-from pipeline import PipelineResult, run_pipeline
+from dataclasses import fields as _dc_fields
+
+from pipeline import PipelineResult, history, run_pipeline
 from ui.player import DualTrackPlayer
 from ui.practice import PracticeWindow
 
@@ -122,6 +124,21 @@ class DrumlyApp(ctk.CTk):
             f, text="", text_color="#ef5350", wraplength=420, justify="left"
         )
         self.error_label.pack(pady=(0, 8))
+
+        # --- Historial de transcripciones ---
+        hist_head = ctk.CTkFrame(f, fg_color="transparent")
+        hist_head.pack(fill="x", pady=(6, 4))
+        ctk.CTkLabel(
+            hist_head, text="Historial", font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(side="left")
+        ctk.CTkButton(
+            hist_head, text="Eliminar duplicados", width=140, height=26,
+            fg_color="#3a3a3a", hover_color="#4a4a4a", command=self._on_dedupe,
+        ).pack(side="right")
+
+        self.history_frame = ctk.CTkScrollableFrame(f, fg_color="#141414")
+        self.history_frame.pack(fill="both", expand=True)
+        self._refresh_history()
 
     # ============================================================ VISTA MEZCLADOR
     def _build_mixer_view(self) -> None:
@@ -305,6 +322,9 @@ class DrumlyApp(ctk.CTk):
             self, self._result.drums_mid, self._result.drums_wav,
             self._result.bpm, self._result.song_name,
             beats_per_bar=self._result.beats_per_bar,
+            no_drums_wav=self._result.no_drums_wav,
+            drums_gain=self.player.gain_drums,
+            no_drums_gain=self.player.gain_no_drums,
         )
         win.focus()
 
@@ -341,8 +361,17 @@ class DrumlyApp(ctk.CTk):
         self.stage_label.configure(text="")
         result = self._result
         assert result is not None
+        # Guardar en el historial y refrescar la lista.
+        try:
+            history.add(OUTPUT_DIR, result)
+        except Exception:  # noqa: BLE001
+            pass
+        self._refresh_history()
+        self._display_result(result)
 
-        # Cargar stems en el reproductor y poblar la vista mezclador.
+    def _display_result(self, result: PipelineResult) -> None:
+        """Carga los stems en el reproductor y abre la vista mezclador."""
+        self._result = result
         try:
             self.player.load(result.drums_wav, result.no_drums_wav)
         except Exception as exc:  # noqa: BLE001
@@ -360,10 +389,68 @@ class DrumlyApp(ctk.CTk):
         )
         self._show_mixer()
 
+    # -------------------------------------------------------------- historial
+    def _refresh_history(self) -> None:
+        for w in self.history_frame.winfo_children():
+            w.destroy()
+        entries = history.load(OUTPUT_DIR)
+        if not entries:
+            ctk.CTkLabel(
+                self.history_frame, text="Aun no hay transcripciones.",
+                text_color="gray55",
+            ).pack(pady=12)
+            return
+        valid_fields = {fld.name for fld in _dc_fields(PipelineResult)}
+        for entry in entries:
+            row = ctk.CTkFrame(self.history_frame, fg_color="#1e1e1e")
+            row.pack(fill="x", pady=3, padx=2)
+            bpm = entry.get("bpm")
+            meter = f"{entry.get('beats_per_bar', 4)}/4"
+            sub = f"{bpm} BPM · {meter}" if bpm else meter
+            ctk.CTkButton(
+                row, text=f"🎵  {entry.get('song_name', '?')}\n{sub}",
+                anchor="w", fg_color="transparent", hover_color="#2a2a2a",
+                command=lambda e=entry: self._open_history_entry(e, valid_fields),
+            ).pack(side="left", fill="x", expand=True)
+            ctk.CTkButton(
+                row, text="🗑", width=36, fg_color="transparent",
+                hover_color="#5a2a2a",
+                command=lambda e=entry: self._delete_history_entry(e),
+            ).pack(side="right", padx=4)
+
+    def _open_history_entry(self, entry: dict, valid_fields: set) -> None:
+        data = {k: v for k, v in entry.items() if k in valid_fields}
+        try:
+            result = PipelineResult(**data)
+        except Exception as exc:  # noqa: BLE001
+            self.error_label.configure(text=f"❌ Entrada invalida: {exc}")
+            return
+        if not (os.path.isfile(result.drums_wav) or os.path.isfile(result.score_pdf)):
+            self.error_label.configure(
+                text="❌ Faltan los archivos de esta transcripcion (¿carpeta borrada?).",
+                text_color="#ef5350",
+            )
+            return
+        self.error_label.configure(text="")
+        self._display_result(result)
+
+    def _delete_history_entry(self, entry: dict) -> None:
+        history.remove(OUTPUT_DIR, entry.get("song_dir", ""))
+        self._refresh_history()
+
+    def _on_dedupe(self) -> None:
+        removed = history.dedupe(OUTPUT_DIR)
+        self._refresh_history()
+        self.error_label.configure(
+            text=(f"Se quitaron {removed} duplicados." if removed
+                  else "No habia duplicados."),
+            text_color="gray70" if not removed else "#1db954",
+        )
+
     def _on_finished_error(self, message: str) -> None:
         self._set_busy(False)
         self.stage_label.configure(text="")
-        self.error_label.configure(text=f"❌ Error: {message}")
+        self.error_label.configure(text=f"❌ Error: {message}", text_color="#ef5350")
 
     def _tick(self) -> None:
         """Actualiza la barra de progreso y el tiempo durante la reproduccion."""
