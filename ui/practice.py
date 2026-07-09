@@ -36,6 +36,8 @@ ACCENT = "#1db954"
 ACCENT_HOVER = "#17a347"
 _PRACTICE_SR = 22050
 _METERS = ["2/4", "3/4", "4/4"]
+_BPM_MIN = 1
+_BPM_MAX = 150
 
 # Indices de pista en el MixPlayer
 _T_DRUMS, _T_OTHERS, _T_CLICK = 0, 1, 2
@@ -187,9 +189,10 @@ class PracticeWindow(ctk.CTkToplevel):
         )
         self.bpm_value.pack(side="right")
         self.bpm_slider = ctk.CTkSlider(
-            left, from_=40, to=220, number_of_steps=180, command=self._on_bpm_slide
+            left, from_=_BPM_MIN, to=_BPM_MAX,
+            number_of_steps=_BPM_MAX - _BPM_MIN, command=self._on_bpm_slide,
         )
-        self.bpm_slider.set(self.bpm0)
+        self.bpm_slider.set(min(max(self.bpm0, _BPM_MIN), _BPM_MAX))
         self.bpm_slider.pack(fill="x", pady=(4, 4))
         ctk.CTkButton(left, text="Reset tempo", height=26, command=self._reset_bpm).pack()
 
@@ -336,7 +339,9 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _reset_bpm(self) -> None:
         self.target_bpm = self.bpm0
-        self.bpm_slider.set(self.bpm0)
+        # El "reset" vuelve al tempo REAL de la cancion aunque supere el rango
+        # del slider (1-150); el slider solo se clampea visualmente.
+        self.bpm_slider.set(min(max(self.bpm0, _BPM_MIN), _BPM_MAX))
         self.bpm_value.configure(text=f"{int(self.bpm0)} BPM")
         self._apply_tempo_async()
 
