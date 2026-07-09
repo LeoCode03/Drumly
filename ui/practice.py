@@ -36,8 +36,10 @@ ACCENT = "#1db954"
 ACCENT_HOVER = "#17a347"
 _PRACTICE_SR = 22050
 _METERS = ["2/4", "3/4", "4/4"]
-_BPM_MIN = 1
-_BPM_MAX = 150
+_BPM_MIN = 40
+_BPM_MAX = 220
+_VOL_MIN = 1
+_VOL_MAX = 150
 
 # Indices de pista en el MixPlayer
 _T_DRUMS, _T_OTHERS, _T_CLICK = 0, 1, 2
@@ -231,8 +233,11 @@ class PracticeWindow(ctk.CTkToplevel):
         ctk.CTkLabel(box, text=name, width=90, anchor="w", text_color="gray80").pack(
             side="left"
         )
-        slider = ctk.CTkSlider(box, from_=0, to=150, number_of_steps=150, command=command)
-        slider.set(gain * 100)
+        slider = ctk.CTkSlider(
+            box, from_=_VOL_MIN, to=_VOL_MAX,
+            number_of_steps=_VOL_MAX - _VOL_MIN, command=command,
+        )
+        slider.set(min(max(gain * 100, _VOL_MIN), _VOL_MAX))
         slider.pack(side="left", fill="x", expand=True, padx=(8, 0))
 
     # ------------------------------------------------------------------ carga

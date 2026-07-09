@@ -33,6 +33,8 @@ OUTPUT_DIR = os.path.abspath("output")
 ACCENT = "#1db954"        # verde
 ACCENT_HOVER = "#17a347"
 CYAN = "#2ee6c7"
+VOL_MIN = 1
+VOL_MAX = 150
 
 
 def _open_path(path: str) -> None:
@@ -240,7 +242,10 @@ class DrumlyApp(ctk.CTk):
         ctk.CTkLabel(col, text=name, anchor="w", text_color="gray80").pack(
             fill="x", pady=(0, 2)
         )
-        slider = ctk.CTkSlider(col, from_=0, to=150, number_of_steps=150, command=command)
+        slider = ctk.CTkSlider(
+            col, from_=VOL_MIN, to=VOL_MAX, number_of_steps=VOL_MAX - VOL_MIN,
+            command=command,
+        )
         slider.set(100)
         slider.pack(fill="x")
 
