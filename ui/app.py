@@ -24,7 +24,7 @@ from tkinter import filedialog
 
 from dataclasses import fields as _dc_fields
 
-from pipeline import PipelineResult, history, run_pipeline
+from pipeline import PipelineResult, history, retranscribe, run_pipeline
 from ui.player import DualTrackPlayer
 from ui.practice import PracticeWindow
 
@@ -219,6 +219,13 @@ class DrumlyApp(ctk.CTk):
         )
         self.practice_btn.pack(fill="x", pady=(0, 8))
 
+        # --- Re-transcribir (sin repetir la separacion de Demucs) ---
+        self.retrans_btn = ctk.CTkButton(
+            f, text="🔄  Re-transcribir", command=self._on_retranscribe,
+            height=36, corner_radius=18, fg_color="#3a3a3a", hover_color="#4a4a4a",
+        )
+        self.retrans_btn.pack(fill="x", pady=(0, 8))
+
         # --- Export ---
         self.export_btn = ctk.CTkButton(
             f, text="Export", command=self._on_export, height=48,
@@ -330,8 +337,32 @@ class DrumlyApp(ctk.CTk):
             no_drums_wav=self._result.no_drums_wav,
             drums_gain=self.player.gain_drums,
             no_drums_gain=self.player.gain_no_drums,
+            beat_offset=self._result.beat_offset,
         )
         win.focus()
+
+    def _on_retranscribe(self) -> None:
+        """Re-ejecuta ADTOF + analisis + PDF sobre los stems ya separados."""
+        if not self._result:
+            return
+        self.player.pause()
+        self.play_btn.configure(text="▶")
+        for btn in (self.practice_btn, self.retrans_btn, self.export_btn):
+            btn.configure(state="disabled")
+        show_rests = bool(self.show_rests_var.get())
+        prev = self._result
+
+        def work() -> None:
+            try:
+                result = retranscribe(
+                    prev, show_rests=show_rests,
+                    progress=lambda msg: self._msg_queue.put(("rstage", msg)),
+                )
+                self._msg_queue.put(("rdone", result))
+            except Exception as exc:  # noqa: BLE001
+                self._msg_queue.put(("rerror", str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
 
     # ----------------------------------------------------------- worker / UI
     def _run_worker(self) -> None:
@@ -357,6 +388,12 @@ class DrumlyApp(ctk.CTk):
                     self._on_finished_ok()
                 elif kind == "error":
                     self._on_finished_error(payload)
+                elif kind == "rstage":
+                    self.mixer_msg.configure(text=payload, text_color="gray70")
+                elif kind == "rdone":
+                    self._on_retranscribe_done(payload)
+                elif kind == "rerror":
+                    self._on_retranscribe_error(payload)
         except queue.Empty:
             pass
         self.after(100, self._poll_queue)
@@ -456,6 +493,24 @@ class DrumlyApp(ctk.CTk):
         self._set_busy(False)
         self.stage_label.configure(text="")
         self.error_label.configure(text=f"❌ Error: {message}", text_color="#ef5350")
+
+    def _on_retranscribe_done(self, result: PipelineResult) -> None:
+        for btn in (self.practice_btn, self.retrans_btn, self.export_btn):
+            btn.configure(state="normal")
+        try:
+            history.add(OUTPUT_DIR, result)
+        except Exception:  # noqa: BLE001
+            pass
+        self._refresh_history()
+        self._display_result(result)
+        self.mixer_msg.configure(
+            text="✅ Transcripcion regenerada", text_color="#1db954"
+        )
+
+    def _on_retranscribe_error(self, message: str) -> None:
+        for btn in (self.practice_btn, self.retrans_btn, self.export_btn):
+            btn.configure(state="normal")
+        self.mixer_msg.configure(text=f"❌ Error: {message}", text_color="#ef5350")
 
     def _tick(self) -> None:
         """Actualiza la barra de progreso y el tiempo durante la reproduccion."""

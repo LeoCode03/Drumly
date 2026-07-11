@@ -48,6 +48,7 @@ class ScoreCanvas(ctk.CTkFrame):
         self._events: List[Tuple[float, str]] = []
         self._duration = 0.0
         self._bar_seconds = 0.0        # duracion de un compas (para las barras)
+        self._bar_offset = 0.0         # instante del primer tiempo (s)
         self._width = _MARGIN_L
         self._note_items: List[Tuple[int, float]] = []
         self._cursor = None
@@ -68,19 +69,24 @@ class ScoreCanvas(ctk.CTkFrame):
     def set_events(
         self, events: List[Tuple[float, str]], duration: float,
         bpm: Optional[int] = None, beats_per_bar: int = 4,
+        beat_offset: float = 0.0,
     ) -> None:
         self._events = events
         self._duration = max(duration, (events[-1][0] if events else 0.0) + 1.0)
         self._width = int(_MARGIN_L + self._duration * _PX_PER_SEC + 80)
+        self._bar_offset = max(0.0, beat_offset)
         if bpm and bpm > 0:
             self._bar_seconds = beats_per_bar * 60.0 / bpm
         else:
             self._bar_seconds = 0.0
         self._redraw()
 
-    def set_grid(self, bpm: Optional[int], beats_per_bar: int) -> None:
-        """Actualiza las barras de compas (BPM del original + negras/compas)."""
+    def set_grid(
+        self, bpm: Optional[int], beats_per_bar: int, beat_offset: float = 0.0
+    ) -> None:
+        """Actualiza las barras de compas (BPM + negras/compas + primer tiempo)."""
         self._bar_seconds = (beats_per_bar * 60.0 / bpm) if (bpm and bpm > 0) else 0.0
+        self._bar_offset = max(0.0, beat_offset)
         self._redraw()
 
     def set_seek_callback(self, cb: Callable[[float], None]) -> None:
@@ -129,9 +135,11 @@ class ScoreCanvas(ctk.CTkFrame):
         c.create_line(_MARGIN_L - 18, y0, _MARGIN_L - 18, y1, fill=_COL_STAFF, width=4)
         c.create_line(_MARGIN_L - 10, y0, _MARGIN_L - 10, y1, fill=_COL_STAFF, width=4)
 
-        # Barras de compas reales (si conocemos su duracion)
+        # Barras de compas reales (ancladas al primer tiempo detectado)
         if self._bar_seconds > 0.05:
-            t = self._bar_seconds
+            t = self._bar_offset
+            if t < 0.05:  # sin offset: no dibujar una barra pegada a la clave
+                t = self._bar_seconds
             while t < self._duration:
                 x = self._x(t)
                 c.create_line(x, y0 - 8, x, y1 + 8, fill=_COL_BAR)

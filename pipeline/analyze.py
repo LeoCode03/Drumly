@@ -16,14 +16,20 @@ from typing import Optional, Tuple
 
 def estimate_bpm(wav_path: str) -> Optional[int]:
     """Estima el tempo (BPM). Devuelve un entero o None. Nunca lanza."""
-    bpm, _ = estimate_tempo_and_meter(wav_path)
+    bpm, _, _ = estimate_tempo_and_meter(wav_path)
     return bpm
 
 
-def estimate_tempo_and_meter(wav_path: str) -> Tuple[Optional[int], int]:
+def estimate_tempo_and_meter(wav_path: str) -> Tuple[Optional[int], int, float]:
     """
-    Estima (BPM, negras_por_compas). El compas se devuelve como numero de negras
-    por compas (2, 3 o 4 -> 2/4, 3/4, 4/4). Por defecto 4. Nunca lanza.
+    Estima (BPM, negras_por_compas, primer_tiempo_en_segundos).
+
+    - El compas se devuelve como numero de negras por compas (2, 3 o 4).
+    - primer_tiempo: instante del primer beat detectado. Las canciones no suelen
+      empezar exactamente en el tiempo 1 (hay silencio/intro), y anclar el
+      metronomo/compases al segundo 0 los deja corridos "un tiempo".
+
+    Por defecto (None, 4, 0.0). Nunca lanza.
     """
     try:
         import librosa
@@ -35,10 +41,14 @@ def estimate_tempo_and_meter(wav_path: str) -> Tuple[Optional[int], int]:
         if bpm is not None and bpm <= 0:
             bpm = None
 
+        beat_offset = 0.0
+        if beats is not None and len(beats):
+            beat_offset = float(librosa.frames_to_time(beats[0], sr=sr))
+
         beats_per_bar = _estimate_beats_per_bar(y, sr, beats)
-        return bpm, beats_per_bar
+        return bpm, beats_per_bar, beat_offset
     except Exception:  # noqa: BLE001 — informativo, no critico
-        return None, 4
+        return None, 4, 0.0
 
 
 def _estimate_beats_per_bar(y, sr, beats) -> int:

@@ -21,7 +21,7 @@ from .score import midi_to_pdf
 from .separator import separate
 from .transcriber import transcribe
 
-__all__ = ["run_pipeline", "PipelineResult"]
+__all__ = ["run_pipeline", "retranscribe", "PipelineResult"]
 
 
 def _safe_stem(audio_path: str) -> str:
@@ -41,6 +41,7 @@ class PipelineResult:
     score_pdf: str
     bpm: Optional[int]
     beats_per_bar: int = 4
+    beat_offset: float = 0.0  # instante (s) del primer tiempo detectado
 
     @property
     def meter(self) -> str:
@@ -76,14 +77,16 @@ def run_pipeline(
     separate(audio_path, drums_wav, no_drums_wav, progress=progress)
     # 2. Transcripcion a MIDI
     transcribe(drums_wav, drums_mid, progress=progress)
-    # 3. BPM + compas (antes del PDF, para notarlo en el compas correcto)
+    # 3. BPM + compas + primer tiempo (antes del PDF, para notarlo bien)
     if progress:
         progress("Estimando BPM y compas...")
-    bpm, beats_per_bar = estimate_tempo_and_meter(drums_wav)
-    # 4. Partitura PDF (en el compas detectado)
+    bpm, beats_per_bar, beat_offset = estimate_tempo_and_meter(drums_wav)
+    # 4. Partitura PDF (compas detectado, rejilla al BPM real y anclada al
+    #    primer tiempo)
     score_pdf = midi_to_pdf(
         drums_mid, score_pdf, progress=progress,
         show_rests=show_rests, beats_per_bar=beats_per_bar,
+        bpm=bpm, beat_offset=beat_offset,
     )
 
     return PipelineResult(
@@ -95,4 +98,37 @@ def run_pipeline(
         score_pdf=score_pdf,
         bpm=bpm,
         beats_per_bar=beats_per_bar,
+        beat_offset=beat_offset,
+    )
+
+
+def retranscribe(
+    prev: PipelineResult,
+    show_rests: bool = True,
+    progress: Optional[Callable[[str], None]] = None,
+) -> PipelineResult:
+    """
+    Re-ejecuta la transcripcion de una cancion ya separada: ADTOF sobre el
+    drums.wav existente, re-analisis de BPM/compas/primer tiempo y regeneracion
+    del PDF. NO repite la separacion de Demucs (que es lo lento).
+    """
+    transcribe(prev.drums_wav, prev.drums_mid, progress=progress)
+    if progress:
+        progress("Estimando BPM y compas...")
+    bpm, beats_per_bar, beat_offset = estimate_tempo_and_meter(prev.drums_wav)
+    score_pdf = midi_to_pdf(
+        prev.drums_mid, prev.score_pdf, progress=progress,
+        show_rests=show_rests, beats_per_bar=beats_per_bar,
+        bpm=bpm, beat_offset=beat_offset,
+    )
+    return PipelineResult(
+        song_name=prev.song_name,
+        song_dir=prev.song_dir,
+        drums_wav=prev.drums_wav,
+        no_drums_wav=prev.no_drums_wav,
+        drums_mid=prev.drums_mid,
+        score_pdf=score_pdf,
+        bpm=bpm,
+        beats_per_bar=beats_per_bar,
+        beat_offset=beat_offset,
     )

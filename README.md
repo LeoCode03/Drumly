@@ -110,7 +110,8 @@ python main.py
    - **BPM** y **compás** (2/4, 3/4, 4/4) detectados; ambos se pueden **cambiar**.
    - Al cambiar el BPM, la batería se **estira al tempo elegido sin cambiar el tono**
      y el cursor sigue sincronizado.
-   - **Retroceder/avanzar** en tiempo real: barra de progreso o **clic en la partitura**.
+   - **Retroceder/avanzar** en tiempo real: barra de progreso, **clic en la
+     partitura**, o los botones **⏮** (al inicio) y **⏪ 5s**.
    - Sliders de volumen para **Batería**, **Otros** y **Metrónomo**, con los
      mismos valores que dejaste en el mezclador (útil para guiarte con voces/
      instrumentos).
@@ -118,6 +119,12 @@ python main.py
      **"Acentuar 1er tiempo"** para marcar más fuerte el inicio de cada compás.
    - El cursor compensa la **latencia de salida** del audio para quedar alineado
      con lo que suena, a cualquier tempo.
+   - El metrónomo y los compases se **anclan al primer tiempo detectado** de la
+     canción (no al segundo 0), para que el click no quede corrido si hay intro.
+6. Botón **🔄 Re-transcribir** (en la pantalla de mezcla): re-ejecuta la
+   transcripción (ADTOF + BPM/compás/primer tiempo + PDF) sobre los stems ya
+   separados, sin repetir la separación de Demucs. Útil si la transcripción o el
+   metrónomo quedaron desfasados.
    (El PDF de descarga no cambia; esto es solo para practicar. El compás detectado sí
    se usa para notar el PDF en 3/4, 4/4, etc.)
 

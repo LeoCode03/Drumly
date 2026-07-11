@@ -145,24 +145,38 @@ def _resolve_lilypond() -> str:
     )
 
 
-def _extract_events(midi_path: str) -> tuple[List[tuple[float, int]], float]:
-    """Lee el MIDI y devuelve (lista de (offset_en_negras, nota_midi), tempo)."""
+def _extract_events(
+    midi_path: str,
+    bpm: Optional[float] = None,
+    beat_offset: float = 0.0,
+) -> tuple[List[tuple[float, int]], float]:
+    """
+    Lee el MIDI y devuelve (lista de (offset_en_negras, nota_midi), tempo).
+
+    `bpm`: tempo real detectado de la cancion. Es importante pasarlo: ADTOF
+    escribe el MIDI con tempo 120 fijo, asi que cuantizar con el tempo del
+    archivo pone la rejilla a otra velocidad que la musica.
+    `beat_offset`: instante (s) del primer tiempo; la rejilla se ancla ahi para
+    que los compases no queden corridos si la cancion no empieza en el tiempo 1.
+    """
     pm = pretty_midi.PrettyMIDI(midi_path)
 
-    # Tempo (si el MIDI lo trae); por defecto 120 BPM
-    tempo = 120.0
-    try:
-        _times, tempi = pm.get_tempo_changes()
-        if len(tempi):
-            tempo = float(tempi[0])
-    except Exception:  # noqa: BLE001 — si no hay tempo, usamos el por defecto
-        pass
+    tempo = float(bpm) if bpm else 120.0
+    if not bpm:
+        # Tempo del archivo (si lo trae); por defecto 120 BPM
+        try:
+            _times, tempi = pm.get_tempo_changes()
+            if len(tempi):
+                tempo = float(tempi[0])
+        except Exception:  # noqa: BLE001 — si no hay tempo, usamos el por defecto
+            pass
 
     quarters_per_sec = tempo / 60.0
     events: List[tuple[float, int]] = []
     for inst in pm.instruments:
         for note in inst.notes:
-            offset_q = note.start * quarters_per_sec  # segundos -> negras
+            # segundos -> negras, con la rejilla anclada al primer tiempo
+            offset_q = max(0.0, (note.start - beat_offset)) * quarters_per_sec
             events.append((offset_q, int(note.pitch)))
 
     events.sort(key=lambda e: e[0])
@@ -291,6 +305,8 @@ def midi_to_pdf(
     progress: Optional[Callable[[str], None]] = None,
     show_rests: bool = True,
     beats_per_bar: int = 4,
+    bpm: Optional[int] = None,
+    beat_offset: float = 0.0,
 ) -> str:
     """
     Convierte `midi_path` en una partitura PDF guardada en `output_pdf_path`.
@@ -298,6 +314,8 @@ def midi_to_pdf(
     `progress` es un callback opcional para reportar el estado (lo usa la UI).
     `show_rests`: si es False, oculta los silencios y solo muestra las notas tocadas.
     `beats_per_bar`: negras por compas (4 -> 4/4, 3 -> 3/4, ...).
+    `bpm`: tempo real detectado (si se omite, se usa el del MIDI: ADTOF pone 120).
+    `beat_offset`: instante (s) del primer tiempo, para anclar la rejilla.
     Devuelve la ruta del PDF generado.
     """
     def report(msg: str) -> None:
@@ -307,7 +325,7 @@ def midi_to_pdf(
     lilypond = _resolve_lilypond()
 
     report("Leyendo MIDI...")
-    events, tempo = _extract_events(midi_path)
+    events, tempo = _extract_events(midi_path, bpm=bpm, beat_offset=beat_offset)
 
     report("Cuantizando golpes...")
     grid = _build_grid(events)

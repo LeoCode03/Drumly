@@ -57,10 +57,15 @@ def _click_wave(sr: int, freq: float, gain: float) -> np.ndarray:
 
 
 def _make_click_track(
-    n_frames: int, sr: int, bpm: float, beats_per_bar: int = 4, accent: bool = False,
+    n_frames: int, sr: int, bpm: float, beats_per_bar: int = 4,
+    accent: bool = False, offset_seconds: float = 0.0,
 ) -> np.ndarray:
     """
     Click de metronomo (mono) cada negra al tempo `bpm`.
+
+    `offset_seconds`: instante del PRIMER tiempo. Las canciones no suelen empezar
+    exactamente en el tiempo 1; sin este anclaje el click queda corrido respecto
+    a la musica.
 
     Si `accent` es True, el primer tiempo de cada compas (negras/compas =
     `beats_per_bar`) suena mas fuerte y con un tono distinto (mas agudo), como
@@ -76,8 +81,9 @@ def _make_click_track(
     click_normal = _click_wave(sr, 1200, 0.5)
     click_accent = _click_wave(sr, 1800, 0.9) if accent else click_normal
 
+    first = max(0, int(offset_seconds * sr))
     beat = 0
-    for start in range(0, n_frames, interval):
+    for start in range(first, n_frames, interval):
         click = click_accent if (accent and beat % beats_per_bar == 0) else click_normal
         end = min(start + len(click), n_frames)
         track[start:end] += click[: end - start]
@@ -96,7 +102,8 @@ class PracticeWindow(ctk.CTkToplevel):
     def __init__(self, master, midi_path: str, drums_wav: str,
                  bpm: Optional[int], song_name: str, beats_per_bar: int = 4,
                  no_drums_wav: Optional[str] = None,
-                 drums_gain: float = 1.0, no_drums_gain: float = 1.0) -> None:
+                 drums_gain: float = 1.0, no_drums_gain: float = 1.0,
+                 beat_offset: float = 0.0) -> None:
         super().__init__(master)
         self.title(f"Practicar — {song_name}")
         self.geometry("1100x700")
@@ -110,6 +117,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self.rendered_bpm = self.bpm0   # tempo al que esta ESTIRADO el audio actual
         self._bpm_after = None          # id del re-render con debounce
         self.beats_per_bar = beats_per_bar if beats_per_bar in (2, 3, 4) else 4
+        self.beat_offset = max(0.0, float(beat_offset))  # primer tiempo (s)
 
         self.gain_drums = float(drums_gain)
         self.gain_others = float(no_drums_gain)
@@ -202,12 +210,26 @@ class PracticeWindow(ctk.CTkToplevel):
         self.bpm_slider.pack(fill="x", pady=(4, 4))
         ctk.CTkButton(left, text="Reset tempo", height=26, command=self._reset_bpm).pack()
 
+        center = ctk.CTkFrame(controls, fg_color="transparent")
+        center.grid(row=0, column=1, padx=18)
+        self.restart_btn = ctk.CTkButton(
+            center, text="⏮", width=44, height=44, corner_radius=22,
+            command=self._on_restart, font=ctk.CTkFont(size=17),
+            fg_color="#2a2a2a", hover_color="#3a3a3a", state="disabled",
+        )
+        self.restart_btn.pack(side="left", padx=(0, 8))
+        self.back5_btn = ctk.CTkButton(
+            center, text="⏪ 5s", width=56, height=44, corner_radius=22,
+            command=self._on_back5, font=ctk.CTkFont(size=14),
+            fg_color="#2a2a2a", hover_color="#3a3a3a", state="disabled",
+        )
+        self.back5_btn.pack(side="left", padx=(0, 12))
         self.play_btn = ctk.CTkButton(
-            controls, text="▶", width=72, height=72, corner_radius=36,
+            center, text="▶", width=72, height=72, corner_radius=36,
             command=self._on_play_pause, font=ctk.CTkFont(size=26),
             fg_color=ACCENT, hover_color=ACCENT_HOVER, state="disabled",
         )
-        self.play_btn.grid(row=0, column=1, padx=18)
+        self.play_btn.pack(side="left")
 
         right = ctk.CTkFrame(controls, fg_color="transparent")
         right.grid(row=0, column=2, sticky="ew", padx=(12, 0))
@@ -269,11 +291,13 @@ class PracticeWindow(ctk.CTkToplevel):
     def _on_loaded(self, events) -> None:
         self.score.set_events(
             events, self._orig_duration, bpm=int(self.bpm0),
-            beats_per_bar=self.beats_per_bar,
+            beats_per_bar=self.beats_per_bar, beat_offset=self.beat_offset,
         )
         self.time_total.configure(text=_fmt_time(self._orig_duration))
         self._render_buffer(keep_fraction=0.0)
         self.play_btn.configure(state="normal")
+        self.restart_btn.configure(state="normal")
+        self.back5_btn.configure(state="normal")
         self._set_status("" if self.player.available else "Sin dispositivo de audio.")
 
     # --------------------------------------------------------- tempo / buffer
@@ -296,6 +320,8 @@ class PracticeWindow(ctk.CTkToplevel):
         click = _make_click_track(
             n, self._orig_sr, tempo,
             beats_per_bar=self.beats_per_bar, accent=self._metronome_accent.get(),
+            # El primer tiempo tambien se estira con el audio.
+            offset_seconds=self.beat_offset / rate,
         )
         self.player.set_tracks(
             [drums, others, click], self._orig_sr,
@@ -374,7 +400,7 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _on_meter_change(self, value: str) -> None:
         self.beats_per_bar = int(value.split("/")[0])
-        self.score.set_grid(int(self.bpm0), self.beats_per_bar)
+        self.score.set_grid(int(self.bpm0), self.beats_per_bar, self.beat_offset)
         # El patron de acento del click depende del compas: regenerarlo.
         self._apply_tempo_async()
 
@@ -397,6 +423,17 @@ class PracticeWindow(ctk.CTkToplevel):
                 self.play_btn.configure(text="⏸")
             except Exception as exc:  # noqa: BLE001
                 self._set_status(f"No se pudo reproducir: {exc}")
+
+    def _on_restart(self) -> None:
+        """⏮ Vuelve al inicio (sigue reproduciendo si estaba sonando)."""
+        self._seek_seconds(0.0)
+
+    def _on_back5(self) -> None:
+        """⏪ Retrocede 5 segundos (en tiempo de la cancion original)."""
+        if self._orig_duration <= 0:
+            return
+        cur = self.player.fraction() * self._orig_duration
+        self._seek_seconds(max(0.0, cur - 5.0))
 
     # --- seek ---
     def _seek_seconds(self, original_seconds: float) -> None:
