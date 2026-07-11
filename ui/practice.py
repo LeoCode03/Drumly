@@ -113,6 +113,7 @@ class PracticeWindow(ctk.CTkToplevel):
 
         self.gain_drums = float(drums_gain)
         self.gain_others = float(no_drums_gain)
+        self.gain_click = 1.0   # volumen del metronomo (cuando esta activado)
 
         self._orig_drums: Optional[np.ndarray] = None
         self._orig_others: Optional[np.ndarray] = None
@@ -157,8 +158,10 @@ class PracticeWindow(ctk.CTkToplevel):
         vol.grid(row=2, column=0, sticky="ew", padx=16, pady=(2, 0))
         vol.grid_columnconfigure(0, weight=1, uniform="vol")
         vol.grid_columnconfigure(1, weight=1, uniform="vol")
+        vol.grid_columnconfigure(2, weight=1, uniform="vol")
         self._build_vol_slider(vol, 0, "🥁 Bateria", self.gain_drums, self._on_vol_drums)
         self._build_vol_slider(vol, 1, "🎵 Otros", self.gain_others, self._on_vol_others)
+        self._build_vol_slider(vol, 2, "⏱ Metronomo", self.gain_click, self._on_vol_click)
 
         # --- Barra de progreso + tiempos ---
         seekbox = ctk.CTkFrame(self, fg_color="transparent")
@@ -275,7 +278,7 @@ class PracticeWindow(ctk.CTkToplevel):
     # --------------------------------------------------------- tempo / buffer
     def _current_gains(self) -> List[float]:
         return [self.gain_drums, self.gain_others,
-                1.0 if self._metronome.get() else 0.0]
+                self.gain_click if self._metronome.get() else 0.0]
 
     def _render_buffer(self, keep_fraction: float) -> None:
         assert self._orig_drums is not None and self._orig_others is not None
@@ -334,6 +337,12 @@ class PracticeWindow(ctk.CTkToplevel):
         self.gain_others = value / 100.0
         self.player.set_gain(_T_OTHERS, self.gain_others)
 
+    def _on_vol_click(self, value: float) -> None:
+        self.gain_click = value / 100.0
+        # Solo suena si el metronomo esta activado.
+        if self._metronome.get():
+            self.player.set_gain(_T_CLICK, self.gain_click)
+
     def _on_bpm_slide(self, value: float) -> None:
         self.target_bpm = float(value)
         self.bpm_value.configure(text=f"{int(value)} BPM")
@@ -358,7 +367,7 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _on_metronome_toggle(self) -> None:
         # El click ya esta como pista aparte: solo cambiamos su volumen en vivo.
-        self.player.set_gain(_T_CLICK, 1.0 if self._metronome.get() else 0.0)
+        self.player.set_gain(_T_CLICK, self.gain_click if self._metronome.get() else 0.0)
 
     def _on_metronome_accent_toggle(self) -> None:
         self._apply_tempo_async()
@@ -393,9 +402,12 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _tick(self) -> None:
         if self.player.loaded:
+            # Posicion que realmente SUENA = enviado al buffer menos la latencia
+            # de salida (asi el cursor no va adelantado respecto al audio).
+            played = max(0.0, self.player.position() - self.player.latency)
             # El cursor sigue el tempo REAL del audio (rendered_bpm), no el del
             # slider, para que nunca se desincronice mientras se re-renderiza.
-            orig_sec = self.player.position() * (self.rendered_bpm / self.bpm0)
+            orig_sec = played * (self.rendered_bpm / self.bpm0)
             self.score.set_cursor_seconds(orig_sec)
             self.time_cur.configure(text=_fmt_time(orig_sec))
             if not self._user_seeking:

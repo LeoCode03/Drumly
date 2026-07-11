@@ -111,10 +111,13 @@ python main.py
    - Al cambiar el BPM, la batería se **estira al tempo elegido sin cambiar el tono**
      y el cursor sigue sincronizado.
    - **Retroceder/avanzar** en tiempo real: barra de progreso o **clic en la partitura**.
-   - Sliders de volumen para **Batería** y **Otros**, con los mismos valores que
-     dejaste en el mezclador (útil para guiarte con voces/instrumentos).
-   - **Metrónomo** opcional, con casilla **"Acentuar 1er tiempo"** para marcar
-     más fuerte el inicio de cada compás.
+   - Sliders de volumen para **Batería**, **Otros** y **Metrónomo**, con los
+     mismos valores que dejaste en el mezclador (útil para guiarte con voces/
+     instrumentos).
+   - **Metrónomo** opcional (con su propio volumen), con casilla
+     **"Acentuar 1er tiempo"** para marcar más fuerte el inicio de cada compás.
+   - El cursor compensa la **latencia de salida** del audio para quedar alineado
+     con lo que suena, a cualquier tempo.
    (El PDF de descarga no cambia; esto es solo para practicar. El compás detectado sí
    se usa para notar el PDF en 3/4, 4/4, etc.)
 

@@ -208,6 +208,12 @@ class MixPlayer:
         self._stream = None
         self._lock = threading.Lock()
         self._finished = False
+        self._latency = 0.0   # latencia de salida del stream (segundos)
+
+    @property
+    def latency(self) -> float:
+        """Latencia de salida del audio (lo que ya se envio pero aun no suena)."""
+        return self._latency
 
     def set_tracks(
         self, buffers: List[np.ndarray], samplerate: int,
@@ -303,9 +309,15 @@ class MixPlayer:
             self._finished = False
         self._stream = sd.OutputStream(
             samplerate=self.samplerate, channels=1, dtype="float32",
-            callback=self._callback,
+            latency="low", callback=self._callback,
         )
         self._stream.start()
+        # Latencia real de salida: lo enviado al buffer aun no ha sonado, asi que
+        # la posicion "sonando" es _pos/sr menos esta latencia.
+        try:
+            self._latency = float(self._stream.latency)
+        except Exception:  # noqa: BLE001
+            self._latency = 0.0
 
     def pause(self) -> None:
         self._close_stream()
