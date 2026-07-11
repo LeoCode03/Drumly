@@ -122,6 +122,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self._metronome = ctk.BooleanVar(value=False)
         self._metronome_accent = ctk.BooleanVar(value=True)
         self._busy = False
+        self._pending_render = False  # cambio recibido mientras _busy
         self._user_seeking = False
 
         self.player = MixPlayer()
@@ -282,12 +283,18 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _render_buffer(self, keep_fraction: float) -> None:
         assert self._orig_drums is not None and self._orig_others is not None
-        rate = self.target_bpm / self.bpm0
+        # Capturar el tempo pedido UNA sola vez. El estirado tarda segundos y
+        # corre en un hilo: si el usuario sigue moviendo el slider mientras
+        # tanto, leer self.target_bpm varias veces dejaria audio, click y
+        # rendered_bpm a tempos DISTINTOS (partitura a otra velocidad que la
+        # musica, sin auto-correccion posible).
+        tempo = self.target_bpm
+        rate = tempo / self.bpm0
         drums = _stretch(self._orig_drums, rate)
         others = _stretch(self._orig_others, rate)
         n = max(len(drums), len(others))
         click = _make_click_track(
-            n, self._orig_sr, self.target_bpm,
+            n, self._orig_sr, tempo,
             beats_per_bar=self.beats_per_bar, accent=self._metronome_accent.get(),
         )
         self.player.set_tracks(
@@ -295,10 +302,15 @@ class PracticeWindow(ctk.CTkToplevel):
             gains=self._current_gains(), keep_fraction=keep_fraction,
         )
         # A partir de ahora el audio suena a este tempo: el cursor debe usarlo.
-        self.rendered_bpm = self.target_bpm
+        self.rendered_bpm = tempo
 
     def _apply_tempo_async(self) -> None:
-        if self._orig_drums is None or self._busy:
+        if self._orig_drums is None:
+            return
+        if self._busy:
+            # Ya hay un estirado en curso: recordar que quedo un cambio
+            # pendiente (tempo, compas o acento) para re-aplicarlo al terminar.
+            self._pending_render = True
             return
         self._busy = True
         was_playing = self.player.is_playing
@@ -323,9 +335,10 @@ class PracticeWindow(ctk.CTkToplevel):
         if resume:
             self.player.play()
             self.play_btn.configure(text="⏸")
-        # Si el usuario siguio moviendo el slider durante el re-render, aplicamos
-        # el ultimo tempo pedido.
-        if abs(self.target_bpm - self.rendered_bpm) >= 1.0:
+        # Si el usuario cambio algo durante el re-render (siguio moviendo el
+        # slider, o cambio compas/acento), re-aplicamos el ultimo estado pedido.
+        if self._pending_render or abs(self.target_bpm - self.rendered_bpm) >= 1.0:
+            self._pending_render = False
             self._bpm_after = self.after(80, self._apply_tempo_async)
 
     # ----------------------------------------------------------------- eventos
