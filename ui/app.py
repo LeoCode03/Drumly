@@ -346,11 +346,12 @@ class DrumlyApp(ctk.CTk):
         win.focus()
 
     def _on_practice_apply(self, beat_offset: float, beats_per_bar: int,
-                           status_cb) -> None:
+                           status_cb, manual_bpm=None) -> None:
         """
-        Aplica los ajustes MANUALES hechos en la practica (inicio del compas 1 y
-        compas) a la partitura: regenera solo el PDF (sin re-transcribir) y
-        persiste el ajuste en el resultado y el historial.
+        Aplica los ajustes MANUALES hechos en la practica (inicio del compas 1,
+        compas y, si el pulso era Manual, esa rejilla de BPM fija) a la
+        partitura: regenera solo el PDF (sin re-transcribir) y persiste el
+        ajuste en el resultado y el historial.
         """
         if not self._result:
             status_cb("No hay transcripcion activa.")
@@ -363,6 +364,7 @@ class DrumlyApp(ctk.CTk):
                 result = regenerate_score(
                     prev, show_rests=show_rests,
                     beat_offset=beat_offset, beats_per_bar=beats_per_bar,
+                    grid_bpm=manual_bpm,
                 )
                 def done() -> None:
                     self._result = result

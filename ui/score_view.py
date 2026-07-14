@@ -89,7 +89,12 @@ class ScoreCanvas(ctk.CTkFrame):
     def set_grid(
         self, bpm: Optional[int], beats_per_bar: int, beat_offset: float = 0.0
     ) -> None:
-        """Actualiza las barras de compas (BPM + negras/compas + primer tiempo)."""
+        """
+        Barras de compas con rejilla CONSTANTE (BPM fijo), ancladas en
+        `beat_offset`. Anula las barras por beats reales (set_bars) hasta que se
+        vuelvan a establecer.
+        """
+        self._bar_times = []
         self._bar_seconds = (beats_per_bar * 60.0 / bpm) if (bpm and bpm > 0) else 0.0
         self._bar_offset = max(0.0, beat_offset)
         self._redraw()
@@ -161,9 +166,11 @@ class ScoreCanvas(ctk.CTkFrame):
                     x = self._x(t)
                     c.create_line(x, y0 - 8, x, y1 + 8, fill=_COL_BAR)
         elif self._bar_seconds > 0.05:
-            t = self._bar_offset
-            if t < 0.05:  # sin offset: no dibujar una barra pegada a la clave
-                t = self._bar_seconds
+            # Fase anclada en _bar_offset pero cubriendo TODA la cancion
+            # (tambien los compases anteriores a la marca).
+            t = self._bar_offset % self._bar_seconds
+            if t < 0.05:  # no dibujar una barra pegada a la clave
+                t += self._bar_seconds
             while t < self._duration:
                 x = self._x(t)
                 c.create_line(x, y0 - 8, x, y1 + 8, fill=_COL_BAR)

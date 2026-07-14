@@ -140,20 +140,30 @@ def regenerate_score(
     show_rests: bool = True,
     beat_offset: Optional[float] = None,
     beats_per_bar: Optional[int] = None,
+    grid_bpm: Optional[int] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> PipelineResult:
     """
     Regenera SOLO el PDF a partir del MIDI existente, sin re-transcribir ni
     re-detectar nada. Es el camino para los ajustes MANUALES del usuario:
     `beat_offset` (donde empieza el compas 1) y `beats_per_bar` (compas) anulan
-    lo detectado automaticamente. Los beats reales almacenados se conservan.
+    lo detectado automaticamente.
+
+    `grid_bpm`: si se pasa (pulso Manual validado de oido por el usuario), la
+    partitura se cuantiza con una rejilla CONSTANTE a ese BPM anclada en
+    `beat_offset`, ignorando los beats detectados. Los beats almacenados se
+    conservan en el resultado para poder volver al modo Cancion.
     """
     new_offset = prev.beat_offset if beat_offset is None else float(beat_offset)
     new_bpb = prev.beats_per_bar if beats_per_bar is None else int(beats_per_bar)
+    if grid_bpm:
+        quant_bpm, quant_beats = int(grid_bpm), None
+    else:
+        quant_bpm, quant_beats = prev.bpm, prev.beat_times
     score_pdf = midi_to_pdf(
         prev.drums_mid, prev.score_pdf, progress=progress,
         show_rests=show_rests, beats_per_bar=new_bpb,
-        bpm=prev.bpm, beat_offset=new_offset, beat_times=prev.beat_times,
+        bpm=quant_bpm, beat_offset=new_offset, beat_times=quant_beats,
     )
     return replace(
         prev, score_pdf=score_pdf, beat_offset=new_offset, beats_per_bar=new_bpb

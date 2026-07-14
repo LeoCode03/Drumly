@@ -373,11 +373,17 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _update_bars(self) -> None:
         """
-        Redibuja las barras de compas sobre los beats reales, desplazadas para
-        que la barra del compas 1 atraviese EXACTAMENTE el punto marcado (el
-        beat detectado puede estar unas centesimas al costado de la nota real).
+        Redibuja las barras de compas segun el modo de pulso:
+        - Manual: rejilla CONSTANTE al BPM elegido, anclada en la marca (misma
+          rejilla que el click del metronomo, la que el usuario valido de oido).
+        - Cancion: beats reales, desplazados para que la barra del compas 1
+          atraviese EXACTAMENTE el punto marcado (el beat detectado puede estar
+          unas centesimas al costado de la nota real).
         """
-        if self.beat_times:
+        if self._pulse_mode == "manual":
+            self.score.set_grid(int(self.custom_bpm), self.beats_per_bar,
+                                self.beat_offset)
+        elif self.beat_times:
             a = self._anchor_index()
             delta = self.beat_offset - self.beat_times[a]
             idxs = range(a % self.beats_per_bar, len(self.beat_times), self.beats_per_bar)
@@ -529,7 +535,11 @@ class PracticeWindow(ctk.CTkToplevel):
         )
 
     def _on_apply_score(self) -> None:
-        """📄 Regenera la partitura PDF con el inicio de compas y compas elegidos."""
+        """
+        📄 Regenera la partitura PDF con el inicio de compas y compas elegidos.
+        Si el pulso esta en Manual, la partitura se cuantiza con ESA rejilla
+        (el BPM fijo que el usuario valido de oido), no con los beats detectados.
+        """
         if self._on_apply is None:
             return
         self.apply_btn.configure(state="disabled")
@@ -540,7 +550,8 @@ class PracticeWindow(ctk.CTkToplevel):
                 self._set_status(msg)
                 self.apply_btn.configure(state="normal")
 
-        self._on_apply(self.beat_offset, self.beats_per_bar, status_cb)
+        manual_bpm = int(self.custom_bpm) if self._pulse_mode == "manual" else None
+        self._on_apply(self.beat_offset, self.beats_per_bar, status_cb, manual_bpm)
 
     def _on_metronome_toggle(self) -> None:
         # El click ya esta como pista aparte: solo cambiamos su volumen en vivo.
@@ -548,7 +559,8 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _on_pulse_mode(self, value: str) -> None:
         self._pulse_mode = "manual" if value == "Manual" else "cancion"
-        self._apply_tempo_async()  # regenerar la pista de click
+        self._update_bars()          # las barras siguen el pulso elegido
+        self._apply_tempo_async()    # regenerar la pista de click
 
     def _on_custom_bpm_commit(self, _event=None) -> None:
         """Lee el BPM manual del cuadro de texto (20-300) y regenera el click."""
@@ -562,6 +574,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self.pulse_entry.delete(0, "end")
         self.pulse_entry.insert(0, str(int(value)))
         if self._pulse_mode == "manual":
+            self._update_bars()
             self._apply_tempo_async()
 
     def _on_metronome_accent_toggle(self) -> None:
