@@ -61,6 +61,10 @@ class ScoreCanvas(ctk.CTkFrame):
         self._lines: List[float] = []
         self._lane_y: Dict[str, float] = {}
         self._note_r = 6
+        # Relleno lateral = media pantalla: permite centrar EXACTAMENTE cualquier
+        # instante (incluido el 0) -> el cursor queda clavado en el medio y la
+        # partitura se desplaza por debajo.
+        self._pad = 0
 
         self._canvas.bind("<Configure>", lambda e: self._redraw())
         self._canvas.bind("<Button-1>", self._on_click)
@@ -103,10 +107,10 @@ class ScoreCanvas(ctk.CTkFrame):
         self._on_seek = cb
 
     def _x(self, seconds: float) -> float:
-        return _MARGIN_L + seconds * _PX_PER_SEC
+        return self._pad + _MARGIN_L + seconds * _PX_PER_SEC
 
     def _seconds_at(self, x_content: float) -> float:
-        return max(0.0, (x_content - _MARGIN_L) / _PX_PER_SEC)
+        return max(0.0, (x_content - self._pad - _MARGIN_L) / _PX_PER_SEC)
 
     # -------------------------------------------------------------- geometria
     def _recompute_staff(self) -> None:
@@ -133,17 +137,22 @@ class ScoreCanvas(ctk.CTkFrame):
         c.delete("all")
         self._note_items.clear()
         self._hl_state.clear()
-        c.configure(scrollregion=(0, 0, self._width, c.winfo_height()))
+        view_w = max(c.winfo_width(), 1)
+        self._pad = view_w // 2
+        total_w = self._width + 2 * self._pad
+        c.configure(scrollregion=(0, 0, total_w, c.winfo_height()))
 
         lines, r = self._lines, self._note_r
         y0, y1 = lines[0], lines[-1]
+        x_start = self._pad + _MARGIN_L
+        x_end = self._pad + self._width
 
         for y in lines:
-            c.create_line(_MARGIN_L, y, self._width, y, fill=_COL_STAFF)
+            c.create_line(x_start, y, x_end, y, fill=_COL_STAFF)
 
         # Clave de percusion (dos barras gruesas)
-        c.create_line(_MARGIN_L - 18, y0, _MARGIN_L - 18, y1, fill=_COL_STAFF, width=4)
-        c.create_line(_MARGIN_L - 10, y0, _MARGIN_L - 10, y1, fill=_COL_STAFF, width=4)
+        c.create_line(x_start - 18, y0, x_start - 18, y1, fill=_COL_STAFF, width=4)
+        c.create_line(x_start - 10, y0, x_start - 10, y1, fill=_COL_STAFF, width=4)
 
         # Barras de compas: en beats reales si los hay; si no, rejilla constante
         if self._bar_times:
@@ -194,9 +203,12 @@ class ScoreCanvas(ctk.CTkFrame):
                 self._hl_state[item] = on
                 c.itemconfigure(item, fill=_COL_NOTE_HL if on else _COL_NOTE)
 
+        # Cursor clavado en el centro: gracias al relleno lateral, CUALQUIER
+        # instante (incluido el inicio) puede quedar exactamente en el medio.
         view_w = c.winfo_width()
-        if view_w > 1 and self._width > view_w:
-            target = (x - view_w / 2) / self._width
+        total_w = self._width + 2 * self._pad
+        if view_w > 1 and total_w > view_w:
+            target = (x - view_w / 2) / total_w
             c.xview_moveto(min(max(target, 0.0), 1.0))
 
     def reset_cursor(self) -> None:

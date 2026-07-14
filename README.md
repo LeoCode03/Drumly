@@ -126,6 +126,11 @@ python main.py
      **📍 Marcar aquí el inicio del compás 1** (se ajusta al pulso más cercano),
      elige el compás (2/4, 3/4, 4/4) y pulsa **📄 Aplicar a la partitura** para
      regenerar el PDF con tu anclaje, sin re-transcribir.
+   - **Cursor centrado**: la posición actual queda siempre clavada en el centro
+     de la pantalla (también al hacer clic en cualquier punto de la partitura);
+     la partitura se desplaza por debajo.
+   - **Pulso del metrónomo**: *Canción* (sigue los beats reales detectados) o
+     *Manual* (escribe un BPM y el click suena a ese ritmo fijo, 20–300).
    - El metrónomo y los compases se **anclan al primer tiempo detectado** de la
      canción (no al segundo 0), para que el click no quede corrido si hay intro.
 6. Botón **🔄 Re-transcribir** (en la pantalla de mezcla): re-ejecuta la

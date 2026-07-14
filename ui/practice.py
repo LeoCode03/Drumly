@@ -140,6 +140,11 @@ class PracticeWindow(ctk.CTkToplevel):
         self.gain_others = float(no_drums_gain)
         self.gain_click = 1.0   # volumen del metronomo (cuando esta activado)
 
+        # Pulso del metronomo: "cancion" = beats reales detectados; "manual" =
+        # BPM fijo elegido por el usuario (el click suena a ese ritmo constante).
+        self._pulse_mode = "cancion"
+        self.custom_bpm = float(int(self.bpm0))
+
         self._orig_drums: Optional[np.ndarray] = None
         self._orig_others: Optional[np.ndarray] = None
         self._orig_sr = _PRACTICE_SR
@@ -170,6 +175,29 @@ class PracticeWindow(ctk.CTkToplevel):
             header, text="🥁 Practicar en tiempo real",
             font=ctk.CTkFont(size=16, weight="bold"),
         ).pack(side="left")
+
+        # Pulso del metronomo: beats reales de la cancion o BPM fijo manual.
+        pulse_box = ctk.CTkFrame(header, fg_color="transparent")
+        pulse_box.pack(side="left", padx=(18, 0))
+        ctk.CTkLabel(pulse_box, text="Pulso", text_color="gray80").pack(
+            side="left", padx=(0, 6)
+        )
+        self.pulse_seg = ctk.CTkSegmentedButton(
+            pulse_box, values=["Cancion", "Manual"], command=self._on_pulse_mode,
+            height=28,
+        )
+        self.pulse_seg.set("Cancion")
+        self.pulse_seg.pack(side="left", padx=(0, 6))
+        self.pulse_entry = ctk.CTkEntry(pulse_box, width=52, height=28,
+                                        justify="center")
+        self.pulse_entry.insert(0, str(int(self.custom_bpm)))
+        self.pulse_entry.pack(side="left")
+        self.pulse_entry.bind("<Return>", self._on_custom_bpm_commit)
+        self.pulse_entry.bind("<FocusOut>", self._on_custom_bpm_commit)
+        ctk.CTkLabel(pulse_box, text="BPM", text_color="gray60").pack(
+            side="left", padx=(4, 0)
+        )
+
         # Anclaje manual: pausa donde empieza el compas 1 y marcalo; luego
         # aplica ese ajuste (y el compas elegido) a la partitura PDF.
         self.apply_btn = ctk.CTkButton(
@@ -367,15 +395,19 @@ class PracticeWindow(ctk.CTkToplevel):
         drums = _stretch(self._orig_drums, rate)
         others = _stretch(self._orig_others, rate)
         n = max(len(drums), len(others))
-        # Click en los beats REALES (siguen a la banda aunque el tempo fluctue),
-        # estirados igual que el audio y con el acento anclado al compas 1
-        # marcado. Fallback: rejilla constante.
+        # Click del metronomo segun el modo de pulso:
+        #  - "manual": BPM fijo elegido por el usuario (ritmo constante).
+        #  - "cancion": beats REALES (siguen a la banda aunque el tempo fluctue),
+        #    estirados igual que el audio; fallback a rejilla constante.
         click_times: Optional[List[float]] = None
-        if self.beat_times:
+        click_bpm = tempo
+        if self._pulse_mode == "manual":
+            click_bpm = self.custom_bpm
+        elif self.beat_times:
             first = self._anchor_index() % self.beats_per_bar
             click_times = [t / rate for t in self.beat_times[first:]]
         click = _make_click_track(
-            n, self._orig_sr, tempo,
+            n, self._orig_sr, click_bpm,
             beats_per_bar=self.beats_per_bar, accent=self._metronome_accent.get(),
             # El primer tiempo tambien se estira con el audio.
             offset_seconds=self.beat_offset / rate,
@@ -496,6 +528,24 @@ class PracticeWindow(ctk.CTkToplevel):
     def _on_metronome_toggle(self) -> None:
         # El click ya esta como pista aparte: solo cambiamos su volumen en vivo.
         self.player.set_gain(_T_CLICK, self.gain_click if self._metronome.get() else 0.0)
+
+    def _on_pulse_mode(self, value: str) -> None:
+        self._pulse_mode = "manual" if value == "Manual" else "cancion"
+        self._apply_tempo_async()  # regenerar la pista de click
+
+    def _on_custom_bpm_commit(self, _event=None) -> None:
+        """Lee el BPM manual del cuadro de texto (20-300) y regenera el click."""
+        text = self.pulse_entry.get().strip().replace(",", ".")
+        try:
+            value = float(text)
+        except ValueError:
+            value = self.custom_bpm  # entrada invalida: restaurar
+        value = min(max(value, 20.0), 300.0)
+        self.custom_bpm = value
+        self.pulse_entry.delete(0, "end")
+        self.pulse_entry.insert(0, str(int(value)))
+        if self._pulse_mode == "manual":
+            self._apply_tempo_async()
 
     def _on_metronome_accent_toggle(self) -> None:
         self._apply_tempo_async()
