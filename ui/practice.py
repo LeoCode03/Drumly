@@ -593,7 +593,10 @@ class PracticeWindow(ctk.CTkToplevel):
         if self.player.loaded:
             # Posicion que realmente SUENA = enviado al buffer menos la latencia
             # de salida (asi el cursor no va adelantado respecto al audio).
-            played = max(0.0, self.player.position() - self.player.latency)
+            # En PAUSA no hay audio "en vuelo": la posicion es exacta y restar
+            # la latencia arrastraria el cursor fuera del punto clicado.
+            lat = self.player.latency if self.player.is_playing else 0.0
+            played = max(0.0, self.player.position() - lat)
             # El cursor sigue el tempo REAL del audio (rendered_bpm), no el del
             # slider, para que nunca se desincronice mientras se re-renderiza.
             orig_sec = played * (self.rendered_bpm / self.bpm0)
