@@ -220,4 +220,11 @@ class ScoreCanvas(ctk.CTkFrame):
             return
         x_content = self._canvas.canvasx(event.x)
         seconds = min(self._seconds_at(x_content), self._duration)
+        # Iman a la nota: si el clic cae cerca de un punto, saltar EXACTAMENTE
+        # a su centro (asi el cursor y las barras de compas lo atraviesan).
+        if self._events:
+            nearest = min((sec for sec, _ in self._events),
+                          key=lambda s: abs(s - seconds))
+            if abs(nearest - seconds) * _PX_PER_SEC <= 18:  # radio del iman (px)
+                seconds = nearest
         self._on_seek(seconds)

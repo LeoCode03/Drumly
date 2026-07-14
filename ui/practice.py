@@ -149,6 +149,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self._orig_others: Optional[np.ndarray] = None
         self._orig_sr = _PRACTICE_SR
         self._orig_duration = 0.0
+        self._events_sec: List[float] = []  # onsets de las notas dibujadas (s)
         self._metronome = ctk.BooleanVar(value=False)
         self._metronome_accent = ctk.BooleanVar(value=True)
         self._busy = False
@@ -344,6 +345,7 @@ class PracticeWindow(ctk.CTkToplevel):
             self.after(0, lambda: self._set_status(f"Error al cargar: {msg}"))
 
     def _on_loaded(self, events) -> None:
+        self._events_sec = sorted(sec for sec, _ in events)
         self.score.set_events(
             events, self._orig_duration, bpm=int(self.bpm0),
             beats_per_bar=self.beats_per_bar, beat_offset=self.beat_offset,
@@ -370,11 +372,16 @@ class PracticeWindow(ctk.CTkToplevel):
         )
 
     def _update_bars(self) -> None:
-        """Redibuja las barras de compas: en beats reales si los hay."""
+        """
+        Redibuja las barras de compas sobre los beats reales, desplazadas para
+        que la barra del compas 1 atraviese EXACTAMENTE el punto marcado (el
+        beat detectado puede estar unas centesimas al costado de la nota real).
+        """
         if self.beat_times:
             a = self._anchor_index()
+            delta = self.beat_offset - self.beat_times[a]
             idxs = range(a % self.beats_per_bar, len(self.beat_times), self.beats_per_bar)
-            self.score.set_bars([self.beat_times[i] for i in idxs])
+            self.score.set_bars([self.beat_times[i] + delta for i in idxs])
         else:
             self.score.set_grid(int(self.bpm0), self.beats_per_bar, self.beat_offset)
 
@@ -404,8 +411,12 @@ class PracticeWindow(ctk.CTkToplevel):
         if self._pulse_mode == "manual":
             click_bpm = self.custom_bpm
         elif self.beat_times:
-            first = self._anchor_index() % self.beats_per_bar
-            click_times = [t / rate for t in self.beat_times[first:]]
+            # Mismo desplazamiento que las barras: el click del "1" cae
+            # exactamente sobre el punto marcado como inicio del compas.
+            a = self._anchor_index()
+            delta = self.beat_offset - self.beat_times[a]
+            first = a % self.beats_per_bar
+            click_times = [(t + delta) / rate for t in self.beat_times[first:]]
         click = _make_click_track(
             n, self._orig_sr, click_bpm,
             beats_per_bar=self.beats_per_bar, accent=self._metronome_accent.get(),
@@ -499,8 +510,14 @@ class PracticeWindow(ctk.CTkToplevel):
         if self._orig_duration <= 0:
             return
         cur = self.player.fraction() * self._orig_duration
-        if self.beat_times:
-            # Ajustar al beat real mas cercano (el usuario pausa "cerca").
+        # Prioridad: la NOTA mas cercana (el punto que el usuario ve y clico);
+        # la barra del compas debe atravesar SU centro. Si no hay nota cerca,
+        # ajustar al beat detectado mas cercano.
+        note = min(self._events_sec, key=lambda t: abs(t - cur)) \
+            if self._events_sec else None
+        if note is not None and abs(note - cur) <= 0.15:
+            cur = note
+        elif self.beat_times:
             cur = min(self.beat_times, key=lambda t: abs(t - cur))
         self.beat_offset = max(0.0, cur)
         self._update_bars()
