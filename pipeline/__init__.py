@@ -13,15 +13,15 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
-from typing import Callable, Optional
+from dataclasses import dataclass, field, replace
+from typing import Callable, List, Optional
 
 from .analyze import estimate_tempo_and_meter
 from .score import midi_to_pdf
 from .separator import separate
 from .transcriber import transcribe
 
-__all__ = ["run_pipeline", "retranscribe", "PipelineResult"]
+__all__ = ["run_pipeline", "retranscribe", "regenerate_score", "PipelineResult"]
 
 
 def _safe_stem(audio_path: str) -> str:
@@ -41,7 +41,10 @@ class PipelineResult:
     score_pdf: str
     bpm: Optional[int]
     beats_per_bar: int = 4
-    beat_offset: float = 0.0  # instante (s) del primer tiempo detectado
+    beat_offset: float = 0.0  # instante (s) del inicio del compas 1
+    # Pulsos reales de la cancion (curva de tempo). Permite que la partitura
+    # siga el tempo real aunque fluctue (en vivo).
+    beat_times: List[float] = field(default_factory=list)
 
     @property
     def meter(self) -> str:
@@ -77,16 +80,16 @@ def run_pipeline(
     separate(audio_path, drums_wav, no_drums_wav, progress=progress)
     # 2. Transcripcion a MIDI
     transcribe(drums_wav, drums_mid, progress=progress)
-    # 3. BPM + compas + primer tiempo (antes del PDF, para notarlo bien)
+    # 3. BPM + compas + beats reales (antes del PDF, para notarlo bien)
     if progress:
         progress("Estimando BPM y compas...")
-    bpm, beats_per_bar, beat_offset = estimate_tempo_and_meter(drums_wav)
-    # 4. Partitura PDF (compas detectado, rejilla al BPM real y anclada al
-    #    primer tiempo)
+    bpm, beats_per_bar, beat_offset, beat_times = estimate_tempo_and_meter(drums_wav)
+    # 4. Partitura PDF: cuantizada sobre los beats REALES (sigue el tempo aunque
+    #    fluctue) y anclada al inicio del compas 1
     score_pdf = midi_to_pdf(
         drums_mid, score_pdf, progress=progress,
         show_rests=show_rests, beats_per_bar=beats_per_bar,
-        bpm=bpm, beat_offset=beat_offset,
+        bpm=bpm, beat_offset=beat_offset, beat_times=beat_times,
     )
 
     return PipelineResult(
@@ -99,6 +102,7 @@ def run_pipeline(
         bpm=bpm,
         beats_per_bar=beats_per_bar,
         beat_offset=beat_offset,
+        beat_times=beat_times,
     )
 
 
@@ -115,20 +119,42 @@ def retranscribe(
     transcribe(prev.drums_wav, prev.drums_mid, progress=progress)
     if progress:
         progress("Estimando BPM y compas...")
-    bpm, beats_per_bar, beat_offset = estimate_tempo_and_meter(prev.drums_wav)
+    bpm, beats_per_bar, beat_offset, beat_times = estimate_tempo_and_meter(prev.drums_wav)
     score_pdf = midi_to_pdf(
         prev.drums_mid, prev.score_pdf, progress=progress,
         show_rests=show_rests, beats_per_bar=beats_per_bar,
-        bpm=bpm, beat_offset=beat_offset,
+        bpm=bpm, beat_offset=beat_offset, beat_times=beat_times,
     )
-    return PipelineResult(
-        song_name=prev.song_name,
-        song_dir=prev.song_dir,
-        drums_wav=prev.drums_wav,
-        no_drums_wav=prev.no_drums_wav,
-        drums_mid=prev.drums_mid,
+    return replace(
+        prev,
         score_pdf=score_pdf,
         bpm=bpm,
         beats_per_bar=beats_per_bar,
         beat_offset=beat_offset,
+        beat_times=beat_times,
+    )
+
+
+def regenerate_score(
+    prev: PipelineResult,
+    show_rests: bool = True,
+    beat_offset: Optional[float] = None,
+    beats_per_bar: Optional[int] = None,
+    progress: Optional[Callable[[str], None]] = None,
+) -> PipelineResult:
+    """
+    Regenera SOLO el PDF a partir del MIDI existente, sin re-transcribir ni
+    re-detectar nada. Es el camino para los ajustes MANUALES del usuario:
+    `beat_offset` (donde empieza el compas 1) y `beats_per_bar` (compas) anulan
+    lo detectado automaticamente. Los beats reales almacenados se conservan.
+    """
+    new_offset = prev.beat_offset if beat_offset is None else float(beat_offset)
+    new_bpb = prev.beats_per_bar if beats_per_bar is None else int(beats_per_bar)
+    score_pdf = midi_to_pdf(
+        prev.drums_mid, prev.score_pdf, progress=progress,
+        show_rests=show_rests, beats_per_bar=new_bpb,
+        bpm=prev.bpm, beat_offset=new_offset, beat_times=prev.beat_times,
+    )
+    return replace(
+        prev, score_pdf=score_pdf, beat_offset=new_offset, beats_per_bar=new_bpb
     )

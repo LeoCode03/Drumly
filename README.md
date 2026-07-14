@@ -119,6 +119,13 @@ python main.py
      **"Acentuar 1er tiempo"** para marcar más fuerte el inicio de cada compás.
    - El cursor compensa la **latencia de salida** del audio para quedar alineado
      con lo que suena, a cualquier tempo.
+   - **Tempo real (beat tracking)**: la partitura, las barras de compás y el
+     metrónomo siguen los **pulsos reales** de la canción — si la banda acelera o
+     frena (grabaciones en vivo), la notación no se desfasa.
+   - **Anclaje manual**: pausa donde de verdad empieza el compás 1, pulsa
+     **📍 Marcar aquí el inicio del compás 1** (se ajusta al pulso más cercano),
+     elige el compás (2/4, 3/4, 4/4) y pulsa **📄 Aplicar a la partitura** para
+     regenerar el PDF con tu anclaje, sin re-transcribir.
    - El metrónomo y los compases se **anclan al primer tiempo detectado** de la
      canción (no al segundo 0), para que el click no quede corrido si hay intro.
 6. Botón **🔄 Re-transcribir** (en la pantalla de mezcla): re-ejecuta la

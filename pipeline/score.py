@@ -145,19 +145,47 @@ def _resolve_lilypond() -> str:
     )
 
 
+def _seconds_to_quarters(t: float, beat_times: List[float]) -> float:
+    """
+    Posicion en negras medida A LO LARGO de la curva real de beats.
+
+    beat_times[i] es el instante del pulso i: entre dos pulsos se interpola
+    linealmente, y fuera del rango se extrapola con el intervalo del borde. Asi,
+    si la banda acelera o frena (tempo variable, tipico en vivo), "una negra"
+    siempre es la distancia entre dos pulsos REALES y la rejilla sigue a la
+    musica compas a compas en vez de asumir un BPM constante.
+    """
+    import bisect
+
+    n = len(beat_times)
+    if t <= beat_times[0]:
+        step = beat_times[1] - beat_times[0]
+        return (t - beat_times[0]) / step if step > 0 else 0.0
+    if t >= beat_times[-1]:
+        step = beat_times[-1] - beat_times[-2]
+        return (n - 1) + ((t - beat_times[-1]) / step if step > 0 else 0.0)
+    i = bisect.bisect_right(beat_times, t) - 1
+    step = beat_times[i + 1] - beat_times[i]
+    return i + ((t - beat_times[i]) / step if step > 0 else 0.0)
+
+
 def _extract_events(
     midi_path: str,
     bpm: Optional[float] = None,
     beat_offset: float = 0.0,
+    beat_times: Optional[List[float]] = None,
 ) -> tuple[List[tuple[float, int]], float]:
     """
     Lee el MIDI y devuelve (lista de (offset_en_negras, nota_midi), tempo).
+    Los offsets pueden ser negativos (golpes antes del inicio marcado); el
+    llamador los acomoda en compases previos completos.
 
-    `bpm`: tempo real detectado de la cancion. Es importante pasarlo: ADTOF
-    escribe el MIDI con tempo 120 fijo, asi que cuantizar con el tempo del
-    archivo pone la rejilla a otra velocidad que la musica.
-    `beat_offset`: instante (s) del primer tiempo; la rejilla se ancla ahi para
-    que los compases no queden corridos si la cancion no empieza en el tiempo 1.
+    `beat_times`: pulsos reales de la cancion. Si se pasan (>= 2), la conversion
+    segundos->negras sigue el tempo REAL beat a beat (soporta tempo variable).
+    Si no, se usa una rejilla constante con `bpm`.
+    `bpm`: tempo detectado; importante porque ADTOF escribe el MIDI con tempo
+    120 fijo. Se usa como rejilla constante (fallback) y como \\tempo del PDF.
+    `beat_offset`: instante (s) del inicio del compas 1; la rejilla se ancla ahi.
     """
     pm = pretty_midi.PrettyMIDI(midi_path)
 
@@ -171,12 +199,19 @@ def _extract_events(
         except Exception:  # noqa: BLE001 — si no hay tempo, usamos el por defecto
             pass
 
+    use_beats = beat_times is not None and len(beat_times) >= 2
     quarters_per_sec = tempo / 60.0
+    anchor_q = _seconds_to_quarters(beat_offset, beat_times) if use_beats else 0.0
+
     events: List[tuple[float, int]] = []
     for inst in pm.instruments:
         for note in inst.notes:
-            # segundos -> negras, con la rejilla anclada al primer tiempo
-            offset_q = max(0.0, (note.start - beat_offset)) * quarters_per_sec
+            if use_beats:
+                # posicion en negras sobre la curva real de beats
+                offset_q = _seconds_to_quarters(note.start, beat_times) - anchor_q
+            else:
+                # rejilla constante anclada al inicio marcado
+                offset_q = (note.start - beat_offset) * quarters_per_sec
             events.append((offset_q, int(note.pitch)))
 
     events.sort(key=lambda e: e[0])
@@ -190,9 +225,29 @@ def _build_grid(events: List[tuple[float, int]]) -> Dict[int, Set[str]]:
         lily_name = GM_DRUM_TO_LILY.get(note)
         if lily_name is None:
             continue  # nota fuera del kit estandar: se ignora
-        slot = int(round(offset / GRID))
+        slot = max(0, int(round(offset / GRID)))
         grid.setdefault(slot, set()).add(lily_name)
     return grid
+
+
+def _shift_pickup_to_full_bars(
+    events: List[tuple[float, int]], beats_per_bar: int
+) -> List[tuple[float, int]]:
+    """
+    Si hay golpes ANTES del inicio marcado del compas 1 (offsets negativos:
+    intro/anacrusa), desplaza todo un numero entero de compases para que quepan
+    en compases previos completos y el inicio marcado siga cayendo en barra de
+    compas.
+    """
+    if not events:
+        return events
+    min_q = min(q for q, _ in events)
+    if min_q >= -GRID / 2:
+        return events
+    import math
+
+    shift_q = math.ceil(-min_q / beats_per_bar) * beats_per_bar
+    return [(q + shift_q, n) for q, n in events]
 
 
 def _hit_token(hits: Set[str]) -> str:
@@ -307,6 +362,7 @@ def midi_to_pdf(
     beats_per_bar: int = 4,
     bpm: Optional[int] = None,
     beat_offset: float = 0.0,
+    beat_times: Optional[List[float]] = None,
 ) -> str:
     """
     Convierte `midi_path` en una partitura PDF guardada en `output_pdf_path`.
@@ -314,8 +370,10 @@ def midi_to_pdf(
     `progress` es un callback opcional para reportar el estado (lo usa la UI).
     `show_rests`: si es False, oculta los silencios y solo muestra las notas tocadas.
     `beats_per_bar`: negras por compas (4 -> 4/4, 3 -> 3/4, ...).
-    `bpm`: tempo real detectado (si se omite, se usa el del MIDI: ADTOF pone 120).
-    `beat_offset`: instante (s) del primer tiempo, para anclar la rejilla.
+    `bpm`: tempo detectado; se muestra como indicacion y es la rejilla fallback.
+    `beat_offset`: instante (s) del inicio del compas 1, para anclar la rejilla.
+    `beat_times`: pulsos reales de la cancion; si se pasan, la cuantizacion sigue
+    el tempo REAL beat a beat (canciones en vivo con tempo variable incluidas).
     Devuelve la ruta del PDF generado.
     """
     def report(msg: str) -> None:
@@ -325,9 +383,12 @@ def midi_to_pdf(
     lilypond = _resolve_lilypond()
 
     report("Leyendo MIDI...")
-    events, tempo = _extract_events(midi_path, bpm=bpm, beat_offset=beat_offset)
+    events, tempo = _extract_events(
+        midi_path, bpm=bpm, beat_offset=beat_offset, beat_times=beat_times
+    )
 
     report("Cuantizando golpes...")
+    events = _shift_pickup_to_full_bars(events, beats_per_bar)
     grid = _build_grid(events)
     drummode = _grid_to_drummode(grid, beats_per_bar=beats_per_bar, show_rests=show_rests)
 

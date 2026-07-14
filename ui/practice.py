@@ -23,7 +23,7 @@ de avance es invariante al tempo (se conserva al re-estirar).
 from __future__ import annotations
 
 import threading
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import customtkinter as ctk
 import numpy as np
@@ -59,35 +59,44 @@ def _click_wave(sr: int, freq: float, gain: float) -> np.ndarray:
 def _make_click_track(
     n_frames: int, sr: int, bpm: float, beats_per_bar: int = 4,
     accent: bool = False, offset_seconds: float = 0.0,
+    click_times: Optional[List[float]] = None,
 ) -> np.ndarray:
     """
-    Click de metronomo (mono) cada negra al tempo `bpm`.
+    Click de metronomo (mono).
 
-    `offset_seconds`: instante del PRIMER tiempo. Las canciones no suelen empezar
-    exactamente en el tiempo 1; sin este anclaje el click queda corrido respecto
-    a la musica.
+    `click_times`: si se pasa, cada click cae EXACTAMENTE en esos instantes (los
+    beats reales de la cancion, ya estirados al tempo elegido). Asi el metronomo
+    sigue a la banda aunque el tempo fluctue (en vivo). El primer instante de la
+    lista se toma como tiempo 1 del compas.
 
-    Si `accent` es True, el primer tiempo de cada compas (negras/compas =
-    `beats_per_bar`) suena mas fuerte y con un tono distinto (mas agudo), como
-    guia del inicio de cada compas.
+    Sin `click_times`: rejilla constante cada 60/bpm s desde `offset_seconds`
+    (instante del primer tiempo).
+
+    Si `accent` es True, el primer tiempo de cada compas suena mas fuerte y mas
+    agudo, como guia del inicio de compas.
     """
     track = np.zeros(n_frames, dtype="float32")
-    if bpm <= 0 or n_frames <= 0:
-        return track
-    interval = int(sr * 60.0 / bpm)
-    if interval <= 0:
+    if n_frames <= 0:
         return track
 
     click_normal = _click_wave(sr, 1200, 0.5)
     click_accent = _click_wave(sr, 1800, 0.9) if accent else click_normal
 
-    first = max(0, int(offset_seconds * sr))
-    beat = 0
-    for start in range(first, n_frames, interval):
+    if click_times:
+        starts = [int(t * sr) for t in click_times if 0.0 <= t * sr < n_frames]
+    else:
+        if bpm <= 0:
+            return track
+        interval = int(sr * 60.0 / bpm)
+        if interval <= 0:
+            return track
+        first = max(0, int(offset_seconds * sr))
+        starts = list(range(first, n_frames, interval))
+
+    for beat, start in enumerate(starts):
         click = click_accent if (accent and beat % beats_per_bar == 0) else click_normal
         end = min(start + len(click), n_frames)
         track[start:end] += click[: end - start]
-        beat += 1
     return track
 
 
@@ -103,7 +112,9 @@ class PracticeWindow(ctk.CTkToplevel):
                  bpm: Optional[int], song_name: str, beats_per_bar: int = 4,
                  no_drums_wav: Optional[str] = None,
                  drums_gain: float = 1.0, no_drums_gain: float = 1.0,
-                 beat_offset: float = 0.0) -> None:
+                 beat_offset: float = 0.0,
+                 beat_times: Optional[List[float]] = None,
+                 on_apply: Optional[Callable] = None) -> None:
         super().__init__(master)
         self.title(f"Practicar — {song_name}")
         self.geometry("1100x700")
@@ -117,7 +128,13 @@ class PracticeWindow(ctk.CTkToplevel):
         self.rendered_bpm = self.bpm0   # tempo al que esta ESTIRADO el audio actual
         self._bpm_after = None          # id del re-render con debounce
         self.beats_per_bar = beats_per_bar if beats_per_bar in (2, 3, 4) else 4
-        self.beat_offset = max(0.0, float(beat_offset))  # primer tiempo (s)
+        self.beat_offset = max(0.0, float(beat_offset))  # inicio del compas 1 (s)
+        # Pulsos reales de la cancion (beat tracking); si estan, el metronomo y
+        # las barras de compas siguen el tempo REAL aunque fluctue (en vivo).
+        self.beat_times: List[float] = sorted(beat_times) if beat_times else []
+        # Callback para aplicar los ajustes manuales (inicio de compas, compas)
+        # a la partitura PDF: on_apply(beat_offset, beats_per_bar, status_cb).
+        self._on_apply = on_apply
 
         self.gain_drums = float(drums_gain)
         self.gain_others = float(no_drums_gain)
@@ -153,10 +170,20 @@ class PracticeWindow(ctk.CTkToplevel):
             header, text="🥁 Practicar en tiempo real",
             font=ctk.CTkFont(size=16, weight="bold"),
         ).pack(side="left")
-        ctk.CTkLabel(
-            header, text="Clic en la partitura o arrastra la barra para retroceder",
-            text_color="gray60",
-        ).pack(side="right")
+        # Anclaje manual: pausa donde empieza el compas 1 y marcalo; luego
+        # aplica ese ajuste (y el compas elegido) a la partitura PDF.
+        self.apply_btn = ctk.CTkButton(
+            header, text="📄 Aplicar a la partitura", height=30,
+            command=self._on_apply_score,
+            fg_color="#243b52", hover_color="#2d4a68", state="disabled",
+        )
+        self.apply_btn.pack(side="right", padx=(8, 0))
+        self.mark_btn = ctk.CTkButton(
+            header, text="📍 Marcar aqui el inicio del compas 1", height=30,
+            command=self._on_mark_start,
+            fg_color="#2a2a2a", hover_color="#3a3a3a", state="disabled",
+        )
+        self.mark_btn.pack(side="right")
 
         self.score = ScoreCanvas(self, fg_color="transparent")
         self.score.grid(row=1, column=0, sticky="nsew", padx=16, pady=6)
@@ -293,12 +320,35 @@ class PracticeWindow(ctk.CTkToplevel):
             events, self._orig_duration, bpm=int(self.bpm0),
             beats_per_bar=self.beats_per_bar, beat_offset=self.beat_offset,
         )
+        self._update_bars()
         self.time_total.configure(text=_fmt_time(self._orig_duration))
         self._render_buffer(keep_fraction=0.0)
         self.play_btn.configure(state="normal")
         self.restart_btn.configure(state="normal")
         self.back5_btn.configure(state="normal")
+        self.mark_btn.configure(state="normal")
+        if self._on_apply is not None:
+            self.apply_btn.configure(state="normal")
         self._set_status("" if self.player.available else "Sin dispositivo de audio.")
+
+    # ------------------------------------------------- compases / anclaje manual
+    def _anchor_index(self) -> int:
+        """Indice del beat real mas cercano al inicio marcado del compas 1."""
+        if not self.beat_times:
+            return 0
+        return min(
+            range(len(self.beat_times)),
+            key=lambda i: abs(self.beat_times[i] - self.beat_offset),
+        )
+
+    def _update_bars(self) -> None:
+        """Redibuja las barras de compas: en beats reales si los hay."""
+        if self.beat_times:
+            a = self._anchor_index()
+            idxs = range(a % self.beats_per_bar, len(self.beat_times), self.beats_per_bar)
+            self.score.set_bars([self.beat_times[i] for i in idxs])
+        else:
+            self.score.set_grid(int(self.bpm0), self.beats_per_bar, self.beat_offset)
 
     # --------------------------------------------------------- tempo / buffer
     def _current_gains(self) -> List[float]:
@@ -317,11 +367,19 @@ class PracticeWindow(ctk.CTkToplevel):
         drums = _stretch(self._orig_drums, rate)
         others = _stretch(self._orig_others, rate)
         n = max(len(drums), len(others))
+        # Click en los beats REALES (siguen a la banda aunque el tempo fluctue),
+        # estirados igual que el audio y con el acento anclado al compas 1
+        # marcado. Fallback: rejilla constante.
+        click_times: Optional[List[float]] = None
+        if self.beat_times:
+            first = self._anchor_index() % self.beats_per_bar
+            click_times = [t / rate for t in self.beat_times[first:]]
         click = _make_click_track(
             n, self._orig_sr, tempo,
             beats_per_bar=self.beats_per_bar, accent=self._metronome_accent.get(),
             # El primer tiempo tambien se estira con el audio.
             offset_seconds=self.beat_offset / rate,
+            click_times=click_times,
         )
         self.player.set_tracks(
             [drums, others, click], self._orig_sr,
@@ -400,9 +458,40 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _on_meter_change(self, value: str) -> None:
         self.beats_per_bar = int(value.split("/")[0])
-        self.score.set_grid(int(self.bpm0), self.beats_per_bar, self.beat_offset)
+        self._update_bars()
         # El patron de acento del click depende del compas: regenerarlo.
         self._apply_tempo_async()
+
+    def _on_mark_start(self) -> None:
+        """📍 Marca la posicion actual del cursor como inicio del compas 1."""
+        if self._orig_duration <= 0:
+            return
+        cur = self.player.fraction() * self._orig_duration
+        if self.beat_times:
+            # Ajustar al beat real mas cercano (el usuario pausa "cerca").
+            cur = min(self.beat_times, key=lambda t: abs(t - cur))
+        self.beat_offset = max(0.0, cur)
+        self._update_bars()
+        self._apply_tempo_async()  # re-anclar el acento del metronomo
+        self._set_status(
+            f"Compas 1 marcado en {_fmt_time(self.beat_offset)} "
+            f"({self.beat_offset:.2f}s). Usa '📄 Aplicar a la partitura' para "
+            "regenerar el PDF con este inicio."
+        )
+
+    def _on_apply_score(self) -> None:
+        """📄 Regenera la partitura PDF con el inicio de compas y compas elegidos."""
+        if self._on_apply is None:
+            return
+        self.apply_btn.configure(state="disabled")
+        self._set_status("Regenerando partitura...")
+
+        def status_cb(msg: str) -> None:
+            if self.winfo_exists():
+                self._set_status(msg)
+                self.apply_btn.configure(state="normal")
+
+        self._on_apply(self.beat_offset, self.beats_per_bar, status_cb)
 
     def _on_metronome_toggle(self) -> None:
         # El click ya esta como pista aparte: solo cambiamos su volumen en vivo.

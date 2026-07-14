@@ -11,25 +11,32 @@ vista de practica se puede cambiar a mano.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 
 def estimate_bpm(wav_path: str) -> Optional[int]:
     """Estima el tempo (BPM). Devuelve un entero o None. Nunca lanza."""
-    bpm, _, _ = estimate_tempo_and_meter(wav_path)
+    bpm, _, _, _ = estimate_tempo_and_meter(wav_path)
     return bpm
 
 
-def estimate_tempo_and_meter(wav_path: str) -> Tuple[Optional[int], int, float]:
+def estimate_tempo_and_meter(
+    wav_path: str,
+) -> Tuple[Optional[int], int, float, List[float]]:
     """
-    Estima (BPM, negras_por_compas, primer_tiempo_en_segundos).
+    Estima (BPM, negras_por_compas, primer_tiempo_en_segundos, beat_times).
 
-    - El compas se devuelve como numero de negras por compas (2, 3 o 4).
-    - primer_tiempo: instante del primer beat detectado. Las canciones no suelen
-      empezar exactamente en el tiempo 1 (hay silencio/intro), y anclar el
-      metronomo/compases al segundo 0 los deja corridos "un tiempo".
+    - BPM: mediana de los intervalos entre beats (representativo aunque el tempo
+      fluctue; es el valor que se muestra, no el que fija la rejilla).
+    - compas: numero de negras por compas (2, 3 o 4).
+    - primer_tiempo: instante del primer beat detectado (las canciones no suelen
+      empezar exactamente en el tiempo 1).
+    - beat_times: instante REAL (s) de cada pulso de la cancion (beat tracking).
+      Es la curva de tempo real: si la banda acelera o frena (tipico en vivo),
+      estos tiempos lo reflejan y la cuantizacion puede seguirlos compas a compas
+      en vez de asumir un BPM constante.
 
-    Por defecto (None, 4, 0.0). Nunca lanza.
+    Por defecto (None, 4, 0.0, []). Nunca lanza.
     """
     try:
         import librosa
@@ -37,18 +44,28 @@ def estimate_tempo_and_meter(wav_path: str) -> Tuple[Optional[int], int, float]:
 
         y, sr = librosa.load(wav_path, sr=None, mono=True)
         tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-        bpm: Optional[int] = int(round(float(np.atleast_1d(tempo)[0])))
+
+        beat_times: List[float] = []
+        if beats is not None and len(beats):
+            beat_times = [float(t) for t in librosa.frames_to_time(beats, sr=sr)]
+
+        # BPM mostrado: mediana de los intervalos reales (robusta a fluctuacion).
+        bpm: Optional[int] = None
+        if len(beat_times) >= 3:
+            intervals = np.diff(beat_times)
+            med = float(np.median(intervals))
+            if med > 0:
+                bpm = int(round(60.0 / med))
+        if bpm is None:
+            bpm = int(round(float(np.atleast_1d(tempo)[0])))
         if bpm is not None and bpm <= 0:
             bpm = None
 
-        beat_offset = 0.0
-        if beats is not None and len(beats):
-            beat_offset = float(librosa.frames_to_time(beats[0], sr=sr))
-
+        beat_offset = beat_times[0] if beat_times else 0.0
         beats_per_bar = _estimate_beats_per_bar(y, sr, beats)
-        return bpm, beats_per_bar, beat_offset
+        return bpm, beats_per_bar, beat_offset, beat_times
     except Exception:  # noqa: BLE001 — informativo, no critico
-        return None, 4, 0.0
+        return None, 4, 0.0, []
 
 
 def _estimate_beats_per_bar(y, sr, beats) -> int:

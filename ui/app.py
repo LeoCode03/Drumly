@@ -24,7 +24,9 @@ from tkinter import filedialog
 
 from dataclasses import fields as _dc_fields
 
-from pipeline import PipelineResult, history, retranscribe, run_pipeline
+from pipeline import (
+    PipelineResult, history, regenerate_score, retranscribe, run_pipeline,
+)
 from ui.player import DualTrackPlayer
 from ui.practice import PracticeWindow
 
@@ -338,8 +340,46 @@ class DrumlyApp(ctk.CTk):
             drums_gain=self.player.gain_drums,
             no_drums_gain=self.player.gain_no_drums,
             beat_offset=self._result.beat_offset,
+            beat_times=self._result.beat_times,
+            on_apply=self._on_practice_apply,
         )
         win.focus()
+
+    def _on_practice_apply(self, beat_offset: float, beats_per_bar: int,
+                           status_cb) -> None:
+        """
+        Aplica los ajustes MANUALES hechos en la practica (inicio del compas 1 y
+        compas) a la partitura: regenera solo el PDF (sin re-transcribir) y
+        persiste el ajuste en el resultado y el historial.
+        """
+        if not self._result:
+            status_cb("No hay transcripcion activa.")
+            return
+        prev = self._result
+        show_rests = bool(self.show_rests_var.get())
+
+        def work() -> None:
+            try:
+                result = regenerate_score(
+                    prev, show_rests=show_rests,
+                    beat_offset=beat_offset, beats_per_bar=beats_per_bar,
+                )
+                def done() -> None:
+                    self._result = result
+                    try:
+                        history.add(OUTPUT_DIR, result)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._refresh_history()
+                    bpm_txt = f"{result.bpm} BPM" if result.bpm else "-- BPM"
+                    self.bpm_label.configure(text=f"{bpm_txt} · {result.meter}")
+                    status_cb("✅ Partitura regenerada con el nuevo inicio/compas.")
+                self.after(0, done)
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc)
+                self.after(0, lambda: status_cb(f"Error: {msg}"))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _on_retranscribe(self) -> None:
         """Re-ejecuta ADTOF + analisis + PDF sobre los stems ya separados."""
