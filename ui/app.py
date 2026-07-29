@@ -27,14 +27,14 @@ from dataclasses import fields as _dc_fields
 from pipeline import (
     PipelineResult, history, regenerate_score, retranscribe, run_pipeline,
 )
+from ui import theme
 from ui.player import DualTrackPlayer
 from ui.practice import PracticeWindow
 
 OUTPUT_DIR = os.path.abspath("output")
 
-ACCENT = "#1db954"        # verde
-ACCENT_HOVER = "#17a347"
-CYAN = "#2ee6c7"
+ACCENT = theme.ACCENT
+ACCENT_HOVER = theme.ACCENT_HOVER
 VOL_MIN = 1
 VOL_MAX = 150
 
@@ -56,7 +56,7 @@ def _fmt_time(seconds: float) -> str:
 
 class DrumlyApp(ctk.CTk):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(fg_color=theme.SURFACE1)
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("green")
@@ -92,7 +92,7 @@ class DrumlyApp(ctk.CTk):
             pady=(10, 4)
         )
         ctk.CTkLabel(
-            f, text="De MP3/WAV a partitura de bateria en PDF", text_color="gray70"
+            f, text="De MP3/WAV a partitura de bateria en PDF", text_color=theme.TEXT_MUTED
         ).pack(pady=(0, 24))
 
         self.select_btn = ctk.CTkButton(
@@ -101,14 +101,14 @@ class DrumlyApp(ctk.CTk):
         self.select_btn.pack(pady=(0, 8), fill="x")
 
         self.file_label = ctk.CTkLabel(
-            f, text="Ningun archivo seleccionado", text_color="gray60"
+            f, text="Ningun archivo seleccionado", text_color=theme.TEXT_FAINT
         )
         self.file_label.pack(pady=(0, 16))
 
         self.start_btn = ctk.CTkButton(
             f, text="Generar partitura", command=self._on_start, state="disabled",
             height=44, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color=theme.ON_ACCENT, font=theme.font(16, bold=True),
         )
         self.start_btn.pack(pady=(0, 14), fill="x")
 
@@ -121,11 +121,11 @@ class DrumlyApp(ctk.CTk):
         self.progress.pack(fill="x", pady=(0, 8))
         self.progress.set(0)
 
-        self.stage_label = ctk.CTkLabel(f, text="", text_color="gray80")
+        self.stage_label = ctk.CTkLabel(f, text="", text_color=theme.TEXT_MUTED)
         self.stage_label.pack(pady=(0, 8))
 
         self.error_label = ctk.CTkLabel(
-            f, text="", text_color="#ef5350", wraplength=420, justify="left"
+            f, text="", text_color=theme.DANGER, wraplength=420, justify="left"
         )
         self.error_label.pack(pady=(0, 8))
 
@@ -137,10 +137,10 @@ class DrumlyApp(ctk.CTk):
         ).pack(side="left")
         ctk.CTkButton(
             hist_head, text="Eliminar duplicados", width=140, height=26,
-            fg_color="#3a3a3a", hover_color="#4a4a4a", command=self._on_dedupe,
+            fg_color=theme.SURFACE4, hover_color=theme.SURFACE4, command=self._on_dedupe,
         ).pack(side="right")
 
-        self.history_frame = ctk.CTkScrollableFrame(f, fg_color="#141414")
+        self.history_frame = ctk.CTkScrollableFrame(f, fg_color=theme.SURFACE2)
         self.history_frame.pack(fill="both", expand=True)
         self._refresh_history()
 
@@ -154,11 +154,11 @@ class DrumlyApp(ctk.CTk):
         top.pack(fill="x", pady=(0, 18))
         ctk.CTkButton(
             top, text="←", width=40, height=36, command=self._show_input,
-            fg_color="transparent", hover_color="#2a2a2a",
+            fg_color="transparent", hover_color=theme.SURFACE3,
             font=ctk.CTkFont(size=20, weight="bold"),
         ).pack(side="left")
         self.song_title = ctk.CTkLabel(
-            top, text="", font=ctk.CTkFont(size=17, weight="bold"), wraplength=320
+            top, text="", font=theme.f_title(), wraplength=320
         )
         self.song_title.pack(side="left", expand=True)
 
@@ -179,9 +179,11 @@ class DrumlyApp(ctk.CTk):
 
         times = ctk.CTkFrame(f, fg_color="transparent")
         times.pack(fill="x", pady=(0, 16))
-        self.time_cur = ctk.CTkLabel(times, text="00:00", text_color="gray70")
+        self.time_cur = ctk.CTkLabel(times, text="00:00", text_color=theme.TEXT_MUTED,
+                                     font=theme.f_small())
         self.time_cur.pack(side="left")
-        self.time_total = ctk.CTkLabel(times, text="00:00", text_color="gray70")
+        self.time_total = ctk.CTkLabel(times, text="00:00", text_color=theme.TEXT_MUTED,
+                                       font=theme.f_small())
         self.time_total.pack(side="right")
 
         # --- Controles: BPM | Play | PDF ---
@@ -193,14 +195,14 @@ class DrumlyApp(ctk.CTk):
         bpm_box.grid(row=0, column=0)
         ctk.CTkLabel(bpm_box, text="⏱", font=ctk.CTkFont(size=22)).pack()
         self.bpm_label = ctk.CTkLabel(
-            bpm_box, text="-- BPM", font=ctk.CTkFont(size=13, weight="bold")
+            bpm_box, text="-- BPM", font=theme.font(16, bold=True)
         )
         self.bpm_label.pack()
 
         self.play_btn = ctk.CTkButton(
             controls, text="▶", width=64, height=64, corner_radius=32,
             command=self._on_play_pause, font=ctk.CTkFont(size=22),
-            fg_color="#2a2a2a", hover_color="#3a3a3a",
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4,
         )
         self.play_btn.grid(row=0, column=1)
 
@@ -208,35 +210,38 @@ class DrumlyApp(ctk.CTk):
         pdf_box.grid(row=0, column=2)
         ctk.CTkButton(
             pdf_box, text="📄", width=48, height=40, command=self._on_open_pdf,
-            fg_color="transparent", hover_color="#2a2a2a", font=ctk.CTkFont(size=20),
+            fg_color="transparent", hover_color=theme.SURFACE3, font=ctk.CTkFont(size=20),
         ).pack()
-        ctk.CTkLabel(pdf_box, text="Partitura", text_color="gray70",
-                     font=ctk.CTkFont(size=12)).pack()
+        ctk.CTkLabel(pdf_box, text="Partitura", text_color=theme.TEXT_MUTED,
+                     font=theme.f_small()).pack()
 
-        # --- Practicar en tiempo real ---
+        # --- Practicar en tiempo real: LA accion primaria del producto ---
         self.practice_btn = ctk.CTkButton(
             f, text="🎯  Practicar en tiempo real", command=self._on_practice,
-            height=44, corner_radius=22, fg_color="#243b52", hover_color="#2d4a68",
-            font=ctk.CTkFont(size=15, weight="bold"),
+            height=48, corner_radius=theme.RAD_PILL,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=theme.ON_ACCENT, font=theme.font(16, bold=True),
         )
         self.practice_btn.pack(fill="x", pady=(0, 8))
 
         # --- Re-transcribir (sin repetir la separacion de Demucs) ---
         self.retrans_btn = ctk.CTkButton(
             f, text="🔄  Re-transcribir", command=self._on_retranscribe,
-            height=36, corner_radius=18, fg_color="#3a3a3a", hover_color="#4a4a4a",
+            height=36, corner_radius=18, fg_color=theme.SURFACE3,
+            hover_color=theme.SURFACE4, font=theme.f_body(),
         )
         self.retrans_btn.pack(fill="x", pady=(0, 8))
 
-        # --- Export ---
+        # --- Exportar (accion secundaria: neutra, no compite con Practicar) ---
         self.export_btn = ctk.CTkButton(
-            f, text="Export", command=self._on_export, height=48,
-            corner_radius=24, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            font=ctk.CTkFont(size=17, weight="bold"),
+            f, text="Exportar", command=self._on_export, height=40,
+            corner_radius=theme.RAD_PILL, fg_color=theme.SURFACE3,
+            hover_color=theme.SURFACE4, font=theme.f_body(),
         )
         self.export_btn.pack(fill="x", pady=(0, 4))
 
-        self.mixer_msg = ctk.CTkLabel(f, text="", text_color="gray70")
+        self.mixer_msg = ctk.CTkLabel(f, text="", text_color=theme.TEXT_MUTED,
+                                      font=theme.f_small())
         self.mixer_msg.pack(pady=(4, 0))
 
     def _build_track_row(self, parent, icon: str, name: str, command) -> None:
@@ -244,11 +249,12 @@ class DrumlyApp(ctk.CTk):
         row.pack(fill="x", pady=8)
         ctk.CTkLabel(
             row, text=icon, width=48, height=48, corner_radius=12,
-            fg_color="#16241e", font=ctk.CTkFont(size=22),
+            fg_color=theme.ACCENT_TINT, font=ctk.CTkFont(size=22),
         ).pack(side="left", padx=(0, 14))
         col = ctk.CTkFrame(row, fg_color="transparent")
         col.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(col, text=name, anchor="w", text_color="gray80").pack(
+        ctk.CTkLabel(col, text=name, anchor="w", text_color=theme.TEXT_MUTED,
+                     font=theme.f_body()).pack(
             fill="x", pady=(0, 2)
         )
         slider = ctk.CTkSlider(
@@ -277,7 +283,7 @@ class DrumlyApp(ctk.CTk):
         if not path:
             return
         self._audio_path = path
-        self.file_label.configure(text=os.path.basename(path), text_color="gray85")
+        self.file_label.configure(text=os.path.basename(path), text_color=theme.TEXT)
         self.start_btn.configure(state="normal")
         self.error_label.configure(text="")
         self.stage_label.configure(text="")
@@ -431,7 +437,7 @@ class DrumlyApp(ctk.CTk):
                 elif kind == "error":
                     self._on_finished_error(payload)
                 elif kind == "rstage":
-                    self.mixer_msg.configure(text=payload, text_color="gray70")
+                    self.mixer_msg.configure(text=payload, text_color=theme.TEXT_MUTED)
                 elif kind == "rdone":
                     self._on_retranscribe_done(payload)
                 elif kind == "rerror":
@@ -481,24 +487,24 @@ class DrumlyApp(ctk.CTk):
         if not entries:
             ctk.CTkLabel(
                 self.history_frame, text="Aun no hay transcripciones.",
-                text_color="gray55",
+                text_color=theme.TEXT_FAINT,
             ).pack(pady=12)
             return
         valid_fields = {fld.name for fld in _dc_fields(PipelineResult)}
         for entry in entries:
-            row = ctk.CTkFrame(self.history_frame, fg_color="#1e1e1e")
+            row = ctk.CTkFrame(self.history_frame, fg_color=theme.SURFACE3)
             row.pack(fill="x", pady=3, padx=2)
             bpm = entry.get("bpm")
             meter = f"{entry.get('beats_per_bar', 4)}/4"
             sub = f"{bpm} BPM · {meter}" if bpm else meter
             ctk.CTkButton(
                 row, text=f"🎵  {entry.get('song_name', '?')}\n{sub}",
-                anchor="w", fg_color="transparent", hover_color="#2a2a2a",
+                anchor="w", fg_color="transparent", hover_color=theme.SURFACE3,
                 command=lambda e=entry: self._open_history_entry(e, valid_fields),
             ).pack(side="left", fill="x", expand=True)
             ctk.CTkButton(
                 row, text="🗑", width=36, fg_color="transparent",
-                hover_color="#5a2a2a",
+                hover_color=theme.DANGER_HOVER_BG,
                 command=lambda e=entry: self._delete_history_entry(e),
             ).pack(side="right", padx=4)
 
@@ -512,7 +518,7 @@ class DrumlyApp(ctk.CTk):
         if not (os.path.isfile(result.drums_wav) or os.path.isfile(result.score_pdf)):
             self.error_label.configure(
                 text="❌ Faltan los archivos de esta transcripcion (¿carpeta borrada?).",
-                text_color="#ef5350",
+                text_color=theme.DANGER,
             )
             return
         self.error_label.configure(text="")
@@ -528,13 +534,13 @@ class DrumlyApp(ctk.CTk):
         self.error_label.configure(
             text=(f"Se quitaron {removed} duplicados." if removed
                   else "No habia duplicados."),
-            text_color="gray70" if not removed else "#1db954",
+            text_color=theme.TEXT_MUTED if not removed else theme.ACCENT,
         )
 
     def _on_finished_error(self, message: str) -> None:
         self._set_busy(False)
         self.stage_label.configure(text="")
-        self.error_label.configure(text=f"❌ Error: {message}", text_color="#ef5350")
+        self.error_label.configure(text=f"❌ Error: {message}", text_color=theme.DANGER)
 
     def _on_retranscribe_done(self, result: PipelineResult) -> None:
         for btn in (self.practice_btn, self.retrans_btn, self.export_btn):
@@ -546,13 +552,13 @@ class DrumlyApp(ctk.CTk):
         self._refresh_history()
         self._display_result(result)
         self.mixer_msg.configure(
-            text="✅ Transcripcion regenerada", text_color="#1db954"
+            text="✅ Transcripcion regenerada", text_color=theme.ACCENT
         )
 
     def _on_retranscribe_error(self, message: str) -> None:
         for btn in (self.practice_btn, self.retrans_btn, self.export_btn):
             btn.configure(state="normal")
-        self.mixer_msg.configure(text=f"❌ Error: {message}", text_color="#ef5350")
+        self.mixer_msg.configure(text=f"❌ Error: {message}", text_color=theme.DANGER)
 
     def _tick(self) -> None:
         """Actualiza la barra de progreso y el tiempo durante la reproduccion."""
@@ -607,7 +613,7 @@ class ExportDialog(ctk.CTkToplevel):
             command=self._open_folder,
         ).pack(fill="x", padx=20, pady=6)
 
-        self.msg = ctk.CTkLabel(self, text="", text_color="gray70", wraplength=320)
+        self.msg = ctk.CTkLabel(self, text="", text_color=theme.TEXT_MUTED, wraplength=320)
         self.msg.pack(pady=(8, 0))
 
     def _export_mix(self) -> None:

@@ -19,6 +19,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import customtkinter as ctk
 
+from ui import theme
+
 # Orden vertical (de arriba a abajo) y estilo de cada carril.
 # 'x' = aspa (platos/hi-hat), 'o' = cabeza rellena (tambores).
 _LANE_ORDER = ["cymbal", "hihat", "tom", "snare", "kick"]
@@ -27,12 +29,13 @@ _LANE_STYLE = {"cymbal": "x", "hihat": "x", "tom": "o", "snare": "o", "kick": "o
 _PX_PER_SEC = 120     # ancho temporal (mas grande = notas mas separadas)
 _MARGIN_L = 60        # espacio para la clave
 
-_COL_STAFF = "#8a8a8a"
-_COL_NOTE = "#e8e8e8"
-_COL_NOTE_HL = "#1db954"
-_COL_CURSOR = "#1db954"
-_COL_BAR = "#5a5a5a"
-_COL_BG = "#0f0f0f"
+# Tinta de la partitura: tokens del tema (contraste >=3:1 verificado).
+_COL_STAFF = theme.STAFF
+_COL_NOTE = theme.NOTE
+_COL_NOTE_HL = theme.NOTE_HL
+_COL_CURSOR = theme.CURSOR
+_COL_BAR = theme.BARLINE
+_COL_BG = theme.SURFACE0
 
 
 class ScoreCanvas(ctk.CTkFrame):

@@ -29,11 +29,12 @@ import customtkinter as ctk
 import numpy as np
 
 from pipeline.score import extract_drum_events
+from ui import theme
 from ui.player import MixPlayer
 from ui.score_view import ScoreCanvas
 
-ACCENT = "#1db954"
-ACCENT_HOVER = "#17a347"
+ACCENT = theme.ACCENT
+ACCENT_HOVER = theme.ACCENT_HOVER
 _PRACTICE_SR = 22050
 _METERS = ["2/4", "3/4", "4/4"]
 _BPM_MIN = 40
@@ -115,7 +116,7 @@ class PracticeWindow(ctk.CTkToplevel):
                  beat_offset: float = 0.0,
                  beat_times: Optional[List[float]] = None,
                  on_apply: Optional[Callable] = None) -> None:
-        super().__init__(master)
+        super().__init__(master, fg_color=theme.SURFACE1)
         self.title(f"Practicar — {song_name}")
         self.geometry("1100x700")
         self.minsize(820, 560)
@@ -180,7 +181,7 @@ class PracticeWindow(ctk.CTkToplevel):
         # Pulso del metronomo: beats reales de la cancion o BPM fijo manual.
         pulse_box = ctk.CTkFrame(header, fg_color="transparent")
         pulse_box.pack(side="left", padx=(18, 0))
-        ctk.CTkLabel(pulse_box, text="Pulso", text_color="gray80").pack(
+        ctk.CTkLabel(pulse_box, text="Pulso", text_color=theme.TEXT_MUTED).pack(
             side="left", padx=(0, 6)
         )
         self.pulse_seg = ctk.CTkSegmentedButton(
@@ -195,7 +196,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self.pulse_entry.pack(side="left")
         self.pulse_entry.bind("<Return>", self._on_custom_bpm_commit)
         self.pulse_entry.bind("<FocusOut>", self._on_custom_bpm_commit)
-        ctk.CTkLabel(pulse_box, text="BPM", text_color="gray60").pack(
+        ctk.CTkLabel(pulse_box, text="BPM", text_color=theme.TEXT_FAINT).pack(
             side="left", padx=(4, 0)
         )
 
@@ -204,13 +205,13 @@ class PracticeWindow(ctk.CTkToplevel):
         self.apply_btn = ctk.CTkButton(
             header, text="📄 Aplicar a la partitura", height=30,
             command=self._on_apply_score,
-            fg_color="#243b52", hover_color="#2d4a68", state="disabled",
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.apply_btn.pack(side="right", padx=(8, 0))
         self.mark_btn = ctk.CTkButton(
             header, text="📍 Marcar aqui el inicio del compas 1", height=30,
             command=self._on_mark_start,
-            fg_color="#2a2a2a", hover_color="#3a3a3a", state="disabled",
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.mark_btn.pack(side="right")
 
@@ -253,7 +254,7 @@ class PracticeWindow(ctk.CTkToplevel):
         left.grid(row=0, column=0, sticky="ew", padx=(0, 12))
         row1 = ctk.CTkFrame(left, fg_color="transparent")
         row1.pack(fill="x")
-        ctk.CTkLabel(row1, text="⏱ Tempo", text_color="gray80").pack(side="left")
+        ctk.CTkLabel(row1, text="⏱ Tempo", text_color=theme.TEXT_MUTED).pack(side="left")
         self.bpm_value = ctk.CTkLabel(
             row1, text=f"{int(self.bpm0)} BPM", font=ctk.CTkFont(size=15, weight="bold")
         )
@@ -271,19 +272,20 @@ class PracticeWindow(ctk.CTkToplevel):
         self.restart_btn = ctk.CTkButton(
             center, text="⏮", width=44, height=44, corner_radius=22,
             command=self._on_restart, font=ctk.CTkFont(size=17),
-            fg_color="#2a2a2a", hover_color="#3a3a3a", state="disabled",
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.restart_btn.pack(side="left", padx=(0, 8))
         self.back5_btn = ctk.CTkButton(
             center, text="⏪ 5s", width=56, height=44, corner_radius=22,
             command=self._on_back5, font=ctk.CTkFont(size=14),
-            fg_color="#2a2a2a", hover_color="#3a3a3a", state="disabled",
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.back5_btn.pack(side="left", padx=(0, 12))
         self.play_btn = ctk.CTkButton(
             center, text="▶", width=72, height=72, corner_radius=36,
             command=self._on_play_pause, font=ctk.CTkFont(size=26),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, state="disabled",
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=theme.ON_ACCENT, state="disabled",
         )
         self.play_btn.pack(side="left")
 
@@ -291,7 +293,7 @@ class PracticeWindow(ctk.CTkToplevel):
         right.grid(row=0, column=2, sticky="ew", padx=(12, 0))
         mrow = ctk.CTkFrame(right, fg_color="transparent")
         mrow.pack(fill="x")
-        ctk.CTkLabel(mrow, text="Compas", text_color="gray80").pack(side="left")
+        ctk.CTkLabel(mrow, text="Compas", text_color=theme.TEXT_MUTED).pack(side="left")
         self.meter_menu = ctk.CTkOptionMenu(
             mrow, values=_METERS, width=80, command=self._on_meter_change
         )
@@ -306,13 +308,13 @@ class PracticeWindow(ctk.CTkToplevel):
             command=self._on_metronome_accent_toggle,
         ).pack(anchor="e", pady=(4, 0))
 
-        self.status = ctk.CTkLabel(self, text="", text_color="gray60")
+        self.status = ctk.CTkLabel(self, text="", text_color=theme.TEXT_FAINT)
         self.status.grid(row=5, column=0, pady=(0, 8))
 
     def _build_vol_slider(self, parent, col, name, gain, command) -> None:
         box = ctk.CTkFrame(parent, fg_color="transparent")
         box.grid(row=0, column=col, sticky="ew", padx=6)
-        ctk.CTkLabel(box, text=name, width=90, anchor="w", text_color="gray80").pack(
+        ctk.CTkLabel(box, text=name, width=90, anchor="w", text_color=theme.TEXT_MUTED).pack(
             side="left"
         )
         slider = ctk.CTkSlider(
