@@ -45,11 +45,14 @@ class PipelineResult:
     # Pulsos reales de la cancion (curva de tempo). Permite que la partitura
     # siga el tempo real aunque fluctue (en vivo).
     beat_times: List[float] = field(default_factory=list)
+    # Compas como texto ('6/8', '3/4'...); beats_per_bar guarda NEGRAS por compas
+    # (6/8 -> 3). Entradas viejas sin meter_label caen al formato N/4.
+    meter_label: str = ""
 
     @property
     def meter(self) -> str:
-        """Compas como texto, p. ej. '4/4'."""
-        return f"{self.beats_per_bar}/4"
+        """Compas como texto, p. ej. '4/4' o '6/8'."""
+        return self.meter_label or f"{self.beats_per_bar}/4"
 
 
 def run_pipeline(
@@ -90,6 +93,7 @@ def run_pipeline(
         drums_mid, score_pdf, progress=progress,
         show_rests=show_rests, beats_per_bar=beats_per_bar,
         bpm=bpm, beat_offset=beat_offset, beat_times=beat_times,
+        time_label=f"{beats_per_bar}/4",
     )
 
     return PipelineResult(
@@ -103,6 +107,7 @@ def run_pipeline(
         beats_per_bar=beats_per_bar,
         beat_offset=beat_offset,
         beat_times=beat_times,
+        meter_label=f"{beats_per_bar}/4",
     )
 
 
@@ -124,6 +129,7 @@ def retranscribe(
         prev.drums_mid, prev.score_pdf, progress=progress,
         show_rests=show_rests, beats_per_bar=beats_per_bar,
         bpm=bpm, beat_offset=beat_offset, beat_times=beat_times,
+        time_label=f"{beats_per_bar}/4",
     )
     return replace(
         prev,
@@ -132,6 +138,7 @@ def retranscribe(
         beats_per_bar=beats_per_bar,
         beat_offset=beat_offset,
         beat_times=beat_times,
+        meter_label=f"{beats_per_bar}/4",
     )
 
 
@@ -141,6 +148,7 @@ def regenerate_score(
     beat_offset: Optional[float] = None,
     beats_per_bar: Optional[int] = None,
     grid_bpm: Optional[int] = None,
+    meter_label: Optional[str] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> PipelineResult:
     """
@@ -156,6 +164,7 @@ def regenerate_score(
     """
     new_offset = prev.beat_offset if beat_offset is None else float(beat_offset)
     new_bpb = prev.beats_per_bar if beats_per_bar is None else int(beats_per_bar)
+    new_label = meter_label or prev.meter_label or f"{new_bpb}/4"
     if grid_bpm:
         quant_bpm, quant_beats = int(grid_bpm), None
     else:
@@ -164,7 +173,9 @@ def regenerate_score(
         prev.drums_mid, prev.score_pdf, progress=progress,
         show_rests=show_rests, beats_per_bar=new_bpb,
         bpm=quant_bpm, beat_offset=new_offset, beat_times=quant_beats,
+        time_label=new_label,
     )
     return replace(
-        prev, score_pdf=score_pdf, beat_offset=new_offset, beats_per_bar=new_bpb
+        prev, score_pdf=score_pdf, beat_offset=new_offset, beats_per_bar=new_bpb,
+        meter_label=new_label,
     )

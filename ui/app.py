@@ -35,7 +35,7 @@ OUTPUT_DIR = os.path.abspath("output")
 
 ACCENT = theme.ACCENT
 ACCENT_HOVER = theme.ACCENT_HOVER
-VOL_MIN = 1
+VOL_MIN = 0
 VOL_MAX = 150
 
 
@@ -80,6 +80,10 @@ class DrumlyApp(ctk.CTk):
         self._show_input()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Mezclador operable por teclado (cuando esta visible y hay cancion)
+        self.bind("<space>", self._on_key)
+        self.bind("<Left>", self._on_key)
+        self.bind("<Right>", self._on_key)
         self.after(100, self._poll_queue)
         self.after(200, self._tick)
 
@@ -332,6 +336,24 @@ class DrumlyApp(ctk.CTk):
             return
         ExportDialog(self, self._result, self.player)
 
+    def _on_key(self, event) -> str | None:
+        """Espacio = play/pausa, flechas = ±5 s (solo en el mezclador)."""
+        focus = self.focus_get()
+        if focus is not None and focus.winfo_class() in ("Entry", "TEntry"):
+            return None
+        if not (self.mixer_frame.winfo_ismapped() and self.player.loaded):
+            return None
+        if event.keysym == "space":
+            self._on_play_pause()
+        elif event.keysym in ("Left", "Right"):
+            dur = self.player.duration()
+            if dur > 0:
+                cur = self.player.fraction() * dur
+                delta = -5.0 if event.keysym == "Left" else 5.0
+                frac = min(max((cur + delta) / dur, 0.0), 1.0)
+                self.player.seek_fraction(frac)
+        return "break"
+
     def _on_practice(self) -> None:
         if not self._result:
             return
@@ -348,11 +370,13 @@ class DrumlyApp(ctk.CTk):
             beat_offset=self._result.beat_offset,
             beat_times=self._result.beat_times,
             on_apply=self._on_practice_apply,
+            meter_label=self._result.meter,
         )
         win.focus()
 
     def _on_practice_apply(self, beat_offset: float, beats_per_bar: int,
-                           status_cb, manual_bpm=None) -> None:
+                           status_cb, manual_bpm=None,
+                           meter_label=None) -> None:
         """
         Aplica los ajustes MANUALES hechos en la practica (inicio del compas 1,
         compas y, si el pulso era Manual, esa rejilla de BPM fija) a la
@@ -370,7 +394,7 @@ class DrumlyApp(ctk.CTk):
                 result = regenerate_score(
                     prev, show_rests=show_rests,
                     beat_offset=beat_offset, beats_per_bar=beats_per_bar,
-                    grid_bpm=manual_bpm,
+                    grid_bpm=manual_bpm, meter_label=meter_label,
                 )
                 def done() -> None:
                     self._result = result
@@ -504,11 +528,13 @@ class DrumlyApp(ctk.CTk):
                 anchor="w", fg_color="transparent", hover_color=theme.SURFACE3,
                 command=lambda e=entry: self._open_history_entry(e, valid_fields),
             ).pack(side="left", fill="x", expand=True)
-            ctk.CTkButton(
-                row, text="🗑", width=36, fg_color="transparent",
-                hover_color=theme.DANGER_HOVER_BG,
-                command=lambda e=entry: self._delete_history_entry(e),
-            ).pack(side="right", padx=4)
+            del_btn = ctk.CTkButton(
+                row, text="🗑", width=44, height=32, fg_color="transparent",
+                hover_color=theme.DANGER_HOVER_BG, font=theme.f_small(),
+            )
+            del_btn.configure(
+                command=lambda e=entry, b=del_btn: self._confirm_delete(b, e))
+            del_btn.pack(side="right", padx=4)
 
     def _open_history_entry(self, entry: dict, valid_fields: set) -> None:
         data = {k: v for k, v in entry.items() if k in valid_fields}
@@ -526,9 +552,22 @@ class DrumlyApp(ctk.CTk):
         self.error_label.configure(text="")
         self._display_result(result)
 
-    def _delete_history_entry(self, entry: dict) -> None:
-        history.remove(OUTPUT_DIR, entry.get("song_dir", ""))
-        self._refresh_history()
+    def _confirm_delete(self, btn, entry: dict) -> None:
+        """Borrado en dos pasos: el primer clic arma el boton ('Borrar?') 3 s;
+        el segundo dentro de ese lapso elimina la entrada del historial."""
+        if getattr(btn, "_armed", False):
+            history.remove(OUTPUT_DIR, entry.get("song_dir", ""))
+            self._refresh_history()
+            return
+        btn._armed = True
+        btn.configure(text="Borrar?", width=70, fg_color=theme.DANGER,
+                      text_color=theme.ON_ACCENT)
+        def disarm() -> None:
+            if btn.winfo_exists():
+                btn._armed = False
+                btn.configure(text="🗑", width=44, fg_color="transparent",
+                              text_color=theme.TEXT)
+        self.after(3000, disarm)
 
     def _on_dedupe(self) -> None:
         removed = history.dedupe(OUTPUT_DIR)
@@ -592,13 +631,15 @@ class ExportDialog(ctk.CTkToplevel):
     """Pequeno menu de exportacion (mezcla / PDF / carpeta)."""
 
     def __init__(self, master, result: PipelineResult, player: DualTrackPlayer) -> None:
-        super().__init__(master)
+        super().__init__(master, fg_color=theme.SURFACE1)
         self.title("Exportar")
-        self.geometry("360x260")
+        self.geometry("380x280")
+        self.minsize(380, 280)
         self.result = result
         self.player = player
         self.transient(master)
         self.grab_set()
+        self.bind("<Escape>", lambda e: self.destroy())
 
         ctk.CTkLabel(
             self, text="Exportar", font=theme.f_title()

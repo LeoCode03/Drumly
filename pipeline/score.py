@@ -328,7 +328,8 @@ def _grid_to_drummode(
 
 
 def _write_lilypond(
-    drummode: str, tempo: float, title: str, ly_path: str, beats_per_bar: int = 4
+    drummode: str, tempo: float, title: str, ly_path: str, beats_per_bar: int = 4,
+    time_label: str = "",
 ) -> None:
     """Escribe el archivo .ly completo en disco."""
     content = f"""\\version "2.24.0"
@@ -343,7 +344,7 @@ def _write_lilypond(
   \\new DrumStaff {{
     \\drummode {{
       \\tempo 4 = {int(round(tempo))}
-      \\time {beats_per_bar}/4
+      \\time {time_label or f"{beats_per_bar}/4"}
 {drummode}
     }}
   }}
@@ -363,6 +364,7 @@ def midi_to_pdf(
     bpm: Optional[int] = None,
     beat_offset: float = 0.0,
     beat_times: Optional[List[float]] = None,
+    time_label: str = "",
 ) -> str:
     """
     Convierte `midi_path` en una partitura PDF guardada en `output_pdf_path`.
@@ -399,7 +401,8 @@ def midi_to_pdf(
     # LilyPond decide la extension: usamos el nombre SIN extension como salida.
     out_base = os.path.splitext(os.path.abspath(output_pdf_path))[0]
     ly_path = out_base + ".ly"
-    _write_lilypond(drummode, tempo, title, ly_path, beats_per_bar=beats_per_bar)
+    _write_lilypond(drummode, tempo, title, ly_path, beats_per_bar=beats_per_bar,
+                    time_label=time_label)
 
     report("Generando partitura con LilyPond...")
     result = subprocess.run(

@@ -34,10 +34,10 @@ from ui.player import MixPlayer
 from ui.score_view import ScoreCanvas
 
 _PRACTICE_SR = 22050
-_METERS = ["2/4", "3/4", "4/4"]
+_METERS = ["2/4", "3/4", "4/4", "5/4", "6/4", "6/8"]
 _BPM_MIN = 40
 _BPM_MAX = 220
-_VOL_MIN = 1
+_VOL_MIN = 0
 _VOL_MAX = 150
 
 # Indices de pista en el MixPlayer
@@ -132,7 +132,8 @@ class PracticeWindow(ctk.CTkToplevel):
                  drums_gain: float = 1.0, no_drums_gain: float = 1.0,
                  beat_offset: float = 0.0,
                  beat_times: Optional[List[float]] = None,
-                 on_apply: Optional[Callable] = None) -> None:
+                 on_apply: Optional[Callable] = None,
+                 meter_label: str = "") -> None:
         super().__init__(master, fg_color=theme.SURFACE1)
         self.title(f"Practicar — {song_name}")
         self.geometry("1150x760")
@@ -146,7 +147,9 @@ class PracticeWindow(ctk.CTkToplevel):
         self.target_bpm = self.bpm0     # tempo pedido por el slider
         self.rendered_bpm = self.bpm0   # tempo al que esta ESTIRADO el audio actual
         self._bpm_after = None          # id del re-render con debounce
-        self.beats_per_bar = beats_per_bar if beats_per_bar in (2, 3, 4) else 4
+        self.beats_per_bar = beats_per_bar if beats_per_bar in (2, 3, 4, 5, 6) else 4
+        # Compas como texto (p. ej. "6/8"); beats_per_bar = NEGRAS por compas.
+        self.meter_label = meter_label or f"{self.beats_per_bar}/4"
         self.beat_offset = max(0.0, float(beat_offset))  # inicio del compas 1 (s)
         # Pulsos reales de la cancion (beat tracking); si estan, el metronomo y
         # las barras de compas siguen el tempo REAL aunque fluctue (en vivo).
@@ -181,6 +184,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self._build_widgets()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self._bind_keys()
         self._set_status("Cargando audio...")
         threading.Thread(target=self._load_worker, daemon=True).start()
         self.after(33, self._tick)
@@ -208,7 +212,8 @@ class PracticeWindow(ctk.CTkToplevel):
             compass, values=_METERS, width=78, command=self._on_meter_change,
             font=theme.f_body(),
         )
-        self.meter_menu.set(f"{self.beats_per_bar}/4")
+        self.meter_menu.set(self.meter_label if self.meter_label in _METERS
+                            else f"{self.beats_per_bar}/4")
         self.meter_menu.pack(side="left", padx=(0, theme.SP_MD))
         self.mark_btn = ctk.CTkButton(
             compass, text="Marcar compas 1", height=32, width=140,
@@ -410,7 +415,8 @@ class PracticeWindow(ctk.CTkToplevel):
             self.after(0, lambda: self._on_loaded(events))
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
-            self.after(0, lambda: self._set_status(f"Error al cargar: {msg}"))
+            self.after(0, lambda: self._set_status(
+                f"No se pudo cargar el audio: {msg}", error=True))
 
     def _on_loaded(self, events) -> None:
         self._events_sec = sorted(sec for sec, _ in events)
@@ -427,7 +433,12 @@ class PracticeWindow(ctk.CTkToplevel):
             btn.configure(state="normal")
         if self._on_apply is not None:
             self.apply_btn.configure(state="normal")
-        self._set_status("" if self.player.available else "Sin dispositivo de audio.")
+        if self.player.available:
+            self._set_status("Espacio: play/pausa · Flechas: ±5s · M: metronomo")
+        else:
+            self._set_status(
+                "Sin dispositivo de audio: conecta unos parlantes o auriculares "
+                "y vuelve a abrir esta ventana.", error=True)
 
     # ------------------------------------------------- compases / anclaje manual
     def _anchor_index(self) -> int:
@@ -526,8 +537,9 @@ class PracticeWindow(ctk.CTkToplevel):
                 self.after(0, lambda: self._after_tempo(was_playing))
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc)
-                self.after(0, lambda: (self._set_status(f"Error: {msg}"),
-                                       setattr(self, "_busy", False)))
+                self.after(0, lambda: (self._set_status(
+                    f"No se pudo ajustar la velocidad: {msg}", error=True),
+                    setattr(self, "_busy", False)))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -582,7 +594,11 @@ class PracticeWindow(ctk.CTkToplevel):
         self._apply_tempo_async()
 
     def _on_meter_change(self, value: str) -> None:
-        self.beats_per_bar = int(value.split("/")[0])
+        num, den = (int(x) for x in value.split("/"))
+        self.meter_label = value
+        # NEGRAS por compas: 6/8 -> 3 (dos tiempos de negra con puntillo);
+        # el acento del click cae al inicio de cada compas igualmente.
+        self.beats_per_bar = max(1, num * 4 // den)
         self._update_bars()
         # El patron de acento del click depende del compas: regenerarlo.
         self._apply_tempo_async()
@@ -627,7 +643,8 @@ class PracticeWindow(ctk.CTkToplevel):
                 self.apply_btn.configure(state="normal")
 
         manual_bpm = int(self.custom_bpm) if self._pulse_mode == "manual" else None
-        self._on_apply(self.beat_offset, self.beats_per_bar, status_cb, manual_bpm)
+        self._on_apply(self.beat_offset, self.beats_per_bar, status_cb, manual_bpm,
+                       self.meter_label)
 
     def _on_metronome_toggle(self) -> None:
         # El click ya esta como pista aparte: solo cambiamos su volumen en vivo.
@@ -651,8 +668,15 @@ class PracticeWindow(ctk.CTkToplevel):
         try:
             value = float(text)
         except ValueError:
+            self._set_status(
+                f"'{text}' no es un numero: el pulso sigue en "
+                f"{int(self.custom_bpm)} BPM.", error=True)
             value = self.custom_bpm  # entrada invalida: restaurar
-        value = min(max(value, 20.0), 300.0)
+        clamped = min(max(value, 20.0), 300.0)
+        if clamped != value:
+            self._set_status(
+                f"El pulso va de 20 a 300 BPM: ajustado a {int(clamped)}.")
+        value = clamped
         self.custom_bpm = value
         self.pulse_entry.delete(0, "end")
         self.pulse_entry.insert(0, str(int(value)))
@@ -672,7 +696,7 @@ class PracticeWindow(ctk.CTkToplevel):
                 self.player.play()
                 self.play_btn.configure(text="⏸")
             except Exception as exc:  # noqa: BLE001
-                self._set_status(f"No se pudo reproducir: {exc}")
+                self._set_status(f"No se pudo reproducir: {exc}", error=True)
 
     def _on_restart(self) -> None:
         """Vuelve al inicio (sigue reproduciendo si estaba sonando)."""
@@ -726,9 +750,61 @@ class PracticeWindow(ctk.CTkToplevel):
                 self.play_btn.configure(text="▶")
         self.after(33, self._tick)
 
+    # ------------------------------------------------------------------ teclado
+    def _bind_keys(self) -> None:
+        """
+        Practica operable sin mouse (manos con baquetas):
+          Espacio play/pausa · ←/→ ±5s · Inicio: volver al principio ·
+          ↑/↓ velocidad ±5 BPM · M metronomo · Ctrl+rueda zoom de partitura.
+        """
+        for seq in ("<space>", "<Left>", "<Right>", "<Home>",
+                    "<Up>", "<Down>", "<KeyPress-m>", "<KeyPress-M>"):
+            self.bind(seq, self._on_key)
+        self.bind("<Control-MouseWheel>", self._on_ctrl_wheel)
+        # El foco arranca en la ventana para que las teclas lleguen ya.
+        self.after(400, self.focus_set)
+
+    def _on_key(self, event) -> str | None:
+        # Si el usuario esta escribiendo en un cuadro de texto, no interceptar.
+        focus = self.focus_get()
+        if focus is not None and focus.winfo_class() in ("Entry", "TEntry"):
+            return None
+        key = event.keysym
+        if key == "space":
+            self._on_play_pause()
+        elif key == "Left":
+            self._on_back5()
+        elif key == "Right":
+            self._on_forward5()
+        elif key == "Home":
+            self._on_restart()
+        elif key in ("Up", "Down"):
+            delta = 5.0 if key == "Up" else -5.0
+            self.target_bpm = min(max(self.target_bpm + delta, _BPM_MIN), _BPM_MAX)
+            self.bpm_slider.set(self.target_bpm)
+            self._update_speed_label()
+            if self._bpm_after is not None:
+                self.after_cancel(self._bpm_after)
+            self._bpm_after = self.after(350, self._apply_tempo_async)
+        elif key in ("m", "M"):
+            self._metronome.set(not self._metronome.get())
+            self._on_metronome_toggle()
+        return "break"
+
+    def _on_ctrl_wheel(self, event) -> str:
+        if event.delta > 0:
+            self.score.zoom_in()
+        else:
+            self.score.zoom_out()
+        return "break"
+
     # ----------------------------------------------------------------- helpers
-    def _set_status(self, text: str) -> None:
-        self.status.configure(text=text)
+    def _set_status(self, text: str, error: bool = False) -> None:
+        self.status.configure(
+            text=text,
+            text_color=theme.DANGER if error else theme.TEXT_MUTED,
+            font=theme.f_body() if error else theme.f_small(),
+        )
 
     def _on_close(self) -> None:
         self.player.close()
