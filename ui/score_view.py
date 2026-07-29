@@ -186,7 +186,7 @@ class ScoreCanvas(ctk.CTkFrame):
         # (Ocupa de -1.5g a +4g -> ~7 gaps con margenes.) El tope alto importa
         # en pantallas con escalado de Windows (h son pixeles REALES): con el
         # tope viejo de 44px el pentagrama quedaba diminuto en monitores 2x.
-        gap = max(14, min(h / 7.5, 150))
+        gap = max(14, min(h / 9.4, 120))  # -20% respecto a h/7.5: aire arriba/abajo
         top = h / 2 - 1.2 * gap  # centrado optico del rango usado
         self._lines = [top + i * gap for i in range(5)]
         self._lane_y = {lane: top + g * gap for lane, g in _LANE_GAPS.items()}
