@@ -34,6 +34,17 @@ Gate: usuario pidio explicitamente reestructurar y aplicar -> sin pausa.
   - Errores de practica en gris status sin severidad
   - Positivos a conservar: ScoreCanvas tiempo->X unico + iman + centro; stretch con debounce/captura unica/pending; players con locks; pipeline sin UI
 
+## RESULTADO FINAL (2026-07-29)
+Critique 20/40 -> 31/40 (Bueno). Audit 8/20 -> 16/20 (Bueno).
+Snapshots: .impeccable/critique/2026-07-29T01-24-07Z__ui.md (antes) y
+2026-07-29T01-51-23Z__ui.md (despues). Commits: colorize+typeset 962875d,
+layout ab45b16, clarify 2e6e6a0, harden 880a7b5, adapt 877d743, optimize
+cf3f658, polish (iconos). Todos los pedidos F1-F8 del usuario: HECHOS.
+Omitidos con motivo: bolder/quieter (registro DAW correcto), onboard (fuera de
+alcance), optimize-web y sidecar live (N/A escritorio), widgets.py (solo 2 usos:
+abstraccion prematura). Pendientes ofrecidos: cancel de pipeline, foco visible,
+tooltips, loop A-B, count-in, presets, persistencia por cancion.
+
 ## Fase 2 — Aplicacion (commits por capa: `style(ui): <comando> via impeccable-full`)
 - [ ] 6. colorize+typeset: ui/theme.py (tokens color+tipo+espaciado desde DESIGN.md);
       texto oscuro #0f1211 sobre verde en CTAs; barras compas #7a7a7a; UN acento
