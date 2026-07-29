@@ -74,6 +74,8 @@ class DrumlyApp(ctk.CTk):
 
         self.container = ctk.CTkFrame(self, fg_color="transparent")
         self.container.pack(fill="both", expand=True, padx=20, pady=20)
+        # Los textos largos se reajustan al ancho real de la ventana.
+        self.container.bind("<Configure>", self._on_container_resize)
 
         self._build_input_view()
         self._build_mixer_view()
@@ -335,6 +337,11 @@ class DrumlyApp(ctk.CTk):
         if not self._result:
             return
         ExportDialog(self, self._result, self.player)
+
+    def _on_container_resize(self, event) -> None:
+        w = max(event.width - 24, 200)
+        self.error_label.configure(wraplength=w)
+        self.song_title.configure(wraplength=max(w - 100, 160))
 
     def _on_key(self, event) -> str | None:
         """Espacio = play/pausa, flechas = ±5 s (solo en el mezclador)."""
