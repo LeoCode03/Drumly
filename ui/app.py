@@ -163,9 +163,9 @@ class DrumlyApp(ctk.CTk):
         top = ctk.CTkFrame(f, fg_color="transparent")
         top.pack(fill="x", pady=(0, 18))
         ctk.CTkButton(
-            top, text="←", width=40, height=36, command=self._show_input,
+            top, text="", image=icon("arrow-left", 20), width=44, height=36,
+            command=self._show_input,
             fg_color="transparent", hover_color=theme.SURFACE3,
-            font=ctk.CTkFont(size=20, weight="bold"),
         ).pack(side="left")
         self.song_title = ctk.CTkLabel(
             top, text="", font=theme.f_title(), wraplength=320
