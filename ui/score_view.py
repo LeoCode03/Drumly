@@ -182,9 +182,11 @@ class ScoreCanvas(ctk.CTkFrame):
 
     def _recompute_staff(self) -> None:
         h = max(self._canvas.winfo_height(), 80)
-        # Gap proporcional al alto: los carriles crecen con la ventana.
-        # (El pentagrama ocupa de -1.5g a +4g -> 5.5 gaps + margenes.)
-        gap = max(14, min(44, h / 7.5))
+        # Gap proporcional al alto: el pentagrama LLENA el espacio disponible.
+        # (Ocupa de -1.5g a +4g -> ~7 gaps con margenes.) El tope alto importa
+        # en pantallas con escalado de Windows (h son pixeles REALES): con el
+        # tope viejo de 44px el pentagrama quedaba diminuto en monitores 2x.
+        gap = max(14, min(h / 7.5, 150))
         top = h / 2 - 1.2 * gap  # centrado optico del rango usado
         self._lines = [top + i * gap for i in range(5)]
         self._lane_y = {lane: top + g * gap for lane, g in _LANE_GAPS.items()}
