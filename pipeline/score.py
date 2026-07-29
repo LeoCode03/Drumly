@@ -46,12 +46,17 @@ GM_DRUM_TO_LILY: Dict[int, str] = {
 GRID = 0.25          # rejilla de cuantizacion en negras (0.25 = semicorchea)
 
 # Categoria de cada nota GM, para la vista de practica en pentagrama.
+# Nota: ADTOF transcribe 5 clases (35 bombo, 38 caja, 42 hihat, 47 tom, 49
+# crash); el resto de categorias existen para MIDIs mas ricos.
 GM_DRUM_TO_CATEGORY: Dict[int, str] = {
     35: "kick", 36: "kick",
     37: "snare", 38: "snare", 40: "snare",
     42: "hihat", 44: "hihat", 46: "hihat",
-    49: "cymbal", 51: "cymbal", 53: "cymbal", 55: "cymbal", 57: "cymbal", 59: "cymbal",
-    41: "tom", 43: "tom", 45: "tom", 47: "tom", 48: "tom", 50: "tom",
+    49: "crash", 55: "crash", 57: "crash",
+    51: "ride", 53: "ride", 59: "ride",
+    48: "tom1", 50: "tom1",
+    45: "tom2", 47: "tom2",
+    41: "tom3", 43: "tom3",
 }
 
 

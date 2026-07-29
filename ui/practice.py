@@ -191,7 +191,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self._bind_keys()
         self._set_status("Cargando audio...")
         threading.Thread(target=self._load_worker, daemon=True).start()
-        self.after(33, self._tick)
+        self.after(16, self._tick)
 
     # ---------------------------------------------------------------- widgets
     def _build_widgets(self) -> None:
@@ -751,13 +751,17 @@ class PracticeWindow(ctk.CTkToplevel):
             # El cursor sigue el tempo REAL del audio (rendered_bpm), no el del
             # slider, para que nunca se desincronice mientras se re-renderiza.
             orig_sec = played * (self.rendered_bpm / self.bpm0)
+            # Cursor a 60 fps (barato: coords + resaltado O(log n)); textos y
+            # slider cada ~80 ms (redibujar widgets CTk si es caro).
             self.score.set_cursor_seconds(orig_sec)
-            self.time_cur.configure(text=_fmt_time(orig_sec))
-            if not self._user_seeking:
-                self.seek.set(self.player.fraction())
+            self._tick_n = getattr(self, "_tick_n", 0) + 1
+            if self._tick_n % 5 == 0:
+                self.time_cur.configure(text=_fmt_time(orig_sec))
+                if not self._user_seeking:
+                    self.seek.set(self.player.fraction())
             if self.player.finished and not self.player.is_playing:
                 self.play_btn.configure(image=icon("play", 34, "dark"), text="")
-        self.after(33, self._tick)
+        self.after(16, self._tick)
 
     # ------------------------------------------------------------------ teclado
     def _bind_keys(self) -> None:

@@ -26,20 +26,29 @@ import customtkinter as ctk
 
 from ui import theme
 
-# Estilo de cabeza por carril: 'x' = aspa (platillos/hi-hat),
-# 'o' = cabeza rellena (tambores), 'o2' = cabeza hueca (tom).
-_LANE_STYLE = {"cymbal": "x", "hihat": "x", "tom": "o2", "snare": "o", "kick": "o"}
+# Estilo de cabeza por carril: 'x' = aspa (platillos/hi-hat/ride),
+# 'o' = cabeza rellena (caja/bombo), 'o2' = cabeza hueca (toms).
+_LANE_STYLE = {
+    "crash": "x", "hihat": "x", "ride": "x",
+    "tom1": "o2", "tom2": "o2", "tom3": "o2",
+    "snare": "o", "kick": "o",
+}
 _LANE_LABEL = {
-    "cymbal": "Platillo", "hihat": "Hi-hat", "tom": "Tom",
-    "snare": "Caja", "kick": "Bombo",
+    "crash": "Crash", "hihat": "Hi-hat", "ride": "Ride",
+    "tom1": "Tom 1", "tom2": "Tom 2", "snare": "Caja",
+    "tom3": "Tom 3", "kick": "Bombo",
 }
 # Posicion vertical en "gaps" respecto a la linea superior del pentagrama
-# (notacion real de bateria; separacion minima entre carriles = 1 gap).
+# (notacion estandar de bateria). ADTOF emite 5 clases (crash/hihat/tom2/
+# caja/bombo); ride y toms 1/3 aparecen con MIDIs mas ricos.
 _LANE_GAPS = {
-    "cymbal": -1.5,   # encima del pentagrama
-    "hihat": -0.5,    # justo sobre la linea superior
-    "tom": 0.5,       # 1er espacio
+    "crash": -2.0,    # encima de todo
+    "hihat": -1.0,    # sobre la linea superior
+    "ride": 0.0,      # EN la linea superior
+    "tom1": 0.5,      # 1er espacio
+    "tom2": 1.0,      # EN la 2da linea
     "snare": 1.5,     # 2do espacio
+    "tom3": 2.5,      # 3er espacio
     "kick": 3.5,      # espacio inferior
 }
 
@@ -89,12 +98,15 @@ class ScoreCanvas(ctk.CTkFrame):
         # partitura se desplaza por debajo.
         self._pad = 0
 
-        # Leyenda de carriles (labels fijos sobre el lienzo, no se desplazan)
-        self._legend: Dict[str, ctk.CTkLabel] = {}
+        # Leyenda de carriles: tk.Label PURO a proposito. CTkLabel.place()
+        # escala x/y con el zoom de Windows, pero el canvas dibuja en pixeles
+        # reales: con CTk la leyenda quedaba flotando lejos de su carril.
+        import tkinter as tk
+        self._legend: Dict[str, tk.Label] = {}
         for lane, name in _LANE_LABEL.items():
-            self._legend[lane] = ctk.CTkLabel(
-                self, text=name, text_color=theme.TEXT_FAINT,
-                font=theme.font(12), fg_color=_COL_BG, height=14,
+            self._legend[lane] = tk.Label(
+                self._canvas, text=name, fg=theme.TEXT_FAINT, bg=_COL_BG,
+                font=("Segoe UI", 10), borderwidth=0,
             )
 
         self._resize_after = None
@@ -186,13 +198,13 @@ class ScoreCanvas(ctk.CTkFrame):
         # (Ocupa de -1.5g a +4g -> ~7 gaps con margenes.) El tope alto importa
         # en pantallas con escalado de Windows (h son pixeles REALES): con el
         # tope viejo de 44px el pentagrama quedaba diminuto en monitores 2x.
-        gap = max(14, min(h / 11.75, 96))  # -36% respecto a h/7.5 (ajuste del usuario)
+        gap = max(14, min(h / 13.0, 86))  # ajuste fino del usuario (-10% extra)
         top = h / 2 - 1.2 * gap  # centrado optico del rango usado
         self._lines = [top + i * gap for i in range(5)]
         self._lane_y = {lane: top + g * gap for lane, g in _LANE_GAPS.items()}
         # Diametro (2r ~ 0.78*gap) < separacion minima entre carriles (1*gap):
         # las cabezas de carriles vecinos ya no pueden solaparse.
-        self._note_r = int(max(5, gap / 2.55))
+        self._note_r = int(max(5, gap / 2.8))
 
     # ----------------------------------------------------------------- dibujo
     def _redraw(self) -> None:
@@ -223,7 +235,7 @@ class ScoreCanvas(ctk.CTkFrame):
         c.create_line(x_start - 10, y0, x_start - 10, y1, fill=_COL_STAFF, width=4)
 
         # Barras de compas: en beats reales si los hay; si no, rejilla constante
-        top_ext = self._lane_y["cymbal"] - r - 4
+        top_ext = self._lane_y["crash"] - r - 4
         if self._bar_times:
             for t in self._bar_times:
                 if 0.05 <= t < self._duration:
@@ -284,7 +296,7 @@ class ScoreCanvas(ctk.CTkFrame):
         self._cursor_drawn = seconds
         c = self._canvas
         x = self._x(seconds)
-        top_ext = self._lane_y["cymbal"] - self._note_r - 10
+        top_ext = self._lane_y["crash"] - self._note_r - 10
         c.coords(self._cursor, x, top_ext, x, self._lines[-1] + 18)
 
         # Resaltado O(log n): solo la ventana [t-0.06, t+0.06] via bisect, mas
