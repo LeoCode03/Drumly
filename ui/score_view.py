@@ -1,14 +1,18 @@
 """
 score_view.py — Lienzo de partitura de bateria para seguir en tiempo real.
 
-Pentagrama de 5 lineas donde el eje X es el TIEMPO (segundos reales del audio).
-Cada golpe es una cabeza de nota en su carril (bombo/redoblante/hi-hat/tom/plato).
-Un cursor vertical marca la posicion actual, resalta las notas que suenan y el
-lienzo se auto-desplaza para mantener el cursor a la vista.
+Pentagrama de 5 lineas donde el eje X es el TIEMPO (segundos reales del audio) y
+los carriles verticales siguen la NOTACION REAL de bateria (misma posicion que
+en el PDF): platillo y hi-hat con aspa encima del pentagrama, tom en el 1er
+espacio, caja en el 2do espacio, bombo en el espacio inferior. Separacion entre
+carriles >= 1 gap, con el gap escalando con el alto de la ventana: caja y tom
+son distinguibles a distancia. El tom ademas usa cabeza hueca (forma, no solo
+posicion). Una leyenda fija a la izquierda nombra cada carril.
 
-- Responsive: el pentagrama se centra y escala con el alto de la ventana.
-- Barras de compas reales a partir de BPM + negras/compas.
-- Clic (o arrastre) sobre el lienzo -> seek (retroceder/avanzar) via callback.
+- Cursor clavado en el centro (relleno lateral de media pantalla).
+- Zoom horizontal (zoom_in/zoom_out/set_px): redobles legibles.
+- Barras de compas en beats reales (set_bars) o rejilla constante (set_grid).
+- Clic con iman a la nota mas cercana -> seek exacto via callback.
 
 Como notas y cursor usan la misma funcion tiempo->X, la sincronia es exacta.
 """
@@ -21,15 +25,27 @@ import customtkinter as ctk
 
 from ui import theme
 
-# Orden vertical (de arriba a abajo) y estilo de cada carril.
-# 'x' = aspa (platos/hi-hat), 'o' = cabeza rellena (tambores).
-_LANE_ORDER = ["cymbal", "hihat", "tom", "snare", "kick"]
-_LANE_STYLE = {"cymbal": "x", "hihat": "x", "tom": "o", "snare": "o", "kick": "o"}
+# Estilo de cabeza por carril: 'x' = aspa (platillos/hi-hat),
+# 'o' = cabeza rellena (tambores), 'o2' = cabeza hueca (tom).
+_LANE_STYLE = {"cymbal": "x", "hihat": "x", "tom": "o2", "snare": "o", "kick": "o"}
+_LANE_LABEL = {
+    "cymbal": "Platillo", "hihat": "Hi-hat", "tom": "Tom",
+    "snare": "Caja", "kick": "Bombo",
+}
+# Posicion vertical en "gaps" respecto a la linea superior del pentagrama
+# (notacion real de bateria; separacion minima entre carriles = 1 gap).
+_LANE_GAPS = {
+    "cymbal": -1.5,   # encima del pentagrama
+    "hihat": -0.5,    # justo sobre la linea superior
+    "tom": 0.5,       # 1er espacio
+    "snare": 1.5,     # 2do espacio
+    "kick": 3.5,      # espacio inferior
+}
 
-_PX_PER_SEC = 120     # ancho temporal (mas grande = notas mas separadas)
-_MARGIN_L = 60        # espacio para la clave
+_MARGIN_L = 84        # espacio para clave + leyenda
+_PX_DEFAULT = 200     # ancho temporal por defecto (px por segundo)
+_PX_MIN, _PX_MAX = 60, 480
 
-# Tinta de la partitura: tokens del tema (contraste >=3:1 verificado).
 _COL_STAFF = theme.STAFF
 _COL_NOTE = theme.NOTE
 _COL_NOTE_HL = theme.NOTE_HL
@@ -53,6 +69,7 @@ class ScoreCanvas(ctk.CTkFrame):
         self._bar_seconds = 0.0        # duracion de un compas (fallback constante)
         self._bar_offset = 0.0         # instante del primer tiempo (s)
         self._bar_times: List[float] = []  # barras en tiempos REALES (prioridad)
+        self._px = _PX_DEFAULT         # zoom horizontal (px por segundo)
         self._width = _MARGIN_L
         self._note_items: List[Tuple[int, float]] = []
         self._cursor = None
@@ -69,6 +86,14 @@ class ScoreCanvas(ctk.CTkFrame):
         # partitura se desplaza por debajo.
         self._pad = 0
 
+        # Leyenda de carriles (labels fijos sobre el lienzo, no se desplazan)
+        self._legend: Dict[str, ctk.CTkLabel] = {}
+        for lane, name in _LANE_LABEL.items():
+            self._legend[lane] = ctk.CTkLabel(
+                self, text=name, text_color=theme.TEXT_FAINT,
+                font=theme.font(12), fg_color=_COL_BG, height=14,
+            )
+
         self._canvas.bind("<Configure>", lambda e: self._redraw())
         self._canvas.bind("<Button-1>", self._on_click)
         self._canvas.bind("<B1-Motion>", self._on_click)
@@ -81,12 +106,12 @@ class ScoreCanvas(ctk.CTkFrame):
     ) -> None:
         self._events = events
         self._duration = max(duration, (events[-1][0] if events else 0.0) + 1.0)
-        self._width = int(_MARGIN_L + self._duration * _PX_PER_SEC + 80)
         self._bar_offset = max(0.0, beat_offset)
         if bpm and bpm > 0:
             self._bar_seconds = beats_per_bar * 60.0 / bpm
         else:
             self._bar_seconds = 0.0
+        self._recompute_width()
         self._redraw()
 
     def set_grid(
@@ -114,27 +139,47 @@ class ScoreCanvas(ctk.CTkFrame):
     def set_seek_callback(self, cb: Callable[[float], None]) -> None:
         self._on_seek = cb
 
+    # ------------------------------------------------------------------- zoom
+    @property
+    def px_per_sec(self) -> float:
+        return self._px
+
+    def set_px(self, px: float) -> None:
+        """Fija el zoom horizontal (px por segundo) y redibuja centrado."""
+        px = min(max(px, _PX_MIN), _PX_MAX)
+        if abs(px - self._px) < 0.5:
+            return
+        self._px = px
+        self._recompute_width()
+        self._redraw()
+
+    def zoom_in(self) -> None:
+        self.set_px(self._px * 1.25)
+
+    def zoom_out(self) -> None:
+        self.set_px(self._px / 1.25)
+
+    def _recompute_width(self) -> None:
+        self._width = int(_MARGIN_L + self._duration * self._px + 80)
+
+    # ------------------------------------------------------------- geometria
     def _x(self, seconds: float) -> float:
-        return self._pad + _MARGIN_L + seconds * _PX_PER_SEC
+        return self._pad + _MARGIN_L + seconds * self._px
 
     def _seconds_at(self, x_content: float) -> float:
-        return max(0.0, (x_content - self._pad - _MARGIN_L) / _PX_PER_SEC)
+        return max(0.0, (x_content - self._pad - _MARGIN_L) / self._px)
 
-    # -------------------------------------------------------------- geometria
     def _recompute_staff(self) -> None:
         h = max(self._canvas.winfo_height(), 80)
-        # gap entre lineas proporcional al alto (staff centrado verticalmente)
-        gap = max(12, min(34, h / 9))
-        top = h / 2 - 2 * gap
+        # Gap proporcional al alto: los carriles crecen con la ventana.
+        # (El pentagrama ocupa de -1.5g a +4g -> 5.5 gaps + margenes.)
+        gap = max(14, min(44, h / 7.5))
+        top = h / 2 - 1.2 * gap  # centrado optico del rango usado
         self._lines = [top + i * gap for i in range(5)]
-        self._lane_y = {
-            "cymbal": top - gap * 0.9,
-            "hihat": top,
-            "tom": top + gap * 1.5,
-            "snare": top + gap * 2,
-            "kick": top + gap * 4,
-        }
-        self._note_r = int(max(4, gap / 2.4))
+        self._lane_y = {lane: top + g * gap for lane, g in _LANE_GAPS.items()}
+        # Diametro (2r ~ 0.78*gap) < separacion minima entre carriles (1*gap):
+        # las cabezas de carriles vecinos ya no pueden solaparse.
+        self._note_r = int(max(5, gap / 2.55))
 
     # ----------------------------------------------------------------- dibujo
     def _redraw(self) -> None:
@@ -163,11 +208,12 @@ class ScoreCanvas(ctk.CTkFrame):
         c.create_line(x_start - 10, y0, x_start - 10, y1, fill=_COL_STAFF, width=4)
 
         # Barras de compas: en beats reales si los hay; si no, rejilla constante
+        top_ext = self._lane_y["cymbal"] - r - 4
         if self._bar_times:
             for t in self._bar_times:
                 if 0.05 <= t < self._duration:
                     x = self._x(t)
-                    c.create_line(x, y0 - 8, x, y1 + 8, fill=_COL_BAR)
+                    c.create_line(x, top_ext, x, y1 + 8, fill=_COL_BAR)
         elif self._bar_seconds > 0.05:
             # Fase anclada en _bar_offset pero cubriendo TODA la cancion
             # (tambien los compases anteriores a la marca).
@@ -176,17 +222,20 @@ class ScoreCanvas(ctk.CTkFrame):
                 t += self._bar_seconds
             while t < self._duration:
                 x = self._x(t)
-                c.create_line(x, y0 - 8, x, y1 + 8, fill=_COL_BAR)
+                c.create_line(x, top_ext, x, y1 + 8, fill=_COL_BAR)
                 t += self._bar_seconds
 
-        # Cabezas de nota
+        # Cabezas de nota (aspa=platillos, hueca=tom, rellena=tambores)
         for seconds, category in self._events:
             y = self._lane_y.get(category, lines[2])
             style = _LANE_STYLE.get(category, "o")
             x = self._x(seconds)
             if style == "x":
                 item = c.create_text(x, y, text="✕", fill=_COL_NOTE,
-                                     font=("Arial", int(r * 2.2), "bold"))
+                                     font=("Arial", int(r * 2.1), "bold"))
+            elif style == "o2":
+                item = c.create_oval(x - r, y - r, x + r, y + r,
+                                     outline=_COL_NOTE, width=2, fill=_COL_BG)
             else:
                 item = c.create_oval(x - r, y - r, x + r, y + r,
                                      fill=_COL_NOTE, outline="")
@@ -194,9 +243,19 @@ class ScoreCanvas(ctk.CTkFrame):
             self._hl_state[item] = False
 
         self._cursor = c.create_line(
-            _MARGIN_L, y0 - 18, _MARGIN_L, y1 + 18, fill=_COL_CURSOR, width=3
+            _MARGIN_L, top_ext - 6, _MARGIN_L, y1 + 18, fill=_COL_CURSOR, width=3
         )
+        self._place_legend()
         self.set_cursor_seconds(self._cursor_seconds)
+
+    def _place_legend(self) -> None:
+        """Etiquetas de carril fijas a la izquierda (no se desplazan con el scroll)."""
+        for lane, label in self._legend.items():
+            y = self._lane_y.get(lane)
+            if y is None:
+                continue
+            label.place(x=4, y=y - 8)
+            label.lift()
 
     # ----------------------------------------------------------------- cursor
     def set_cursor_seconds(self, seconds: float) -> None:
@@ -205,13 +264,18 @@ class ScoreCanvas(ctk.CTkFrame):
             return
         c = self._canvas
         x = self._x(seconds)
-        c.coords(self._cursor, x, self._lines[0] - 18, x, self._lines[-1] + 18)
+        top_ext = self._lane_y["cymbal"] - self._note_r - 10
+        c.coords(self._cursor, x, top_ext, x, self._lines[-1] + 18)
 
         for item, sec in self._note_items:
             on = abs(sec - seconds) <= 0.06
             if on != self._hl_state.get(item, False):
                 self._hl_state[item] = on
-                c.itemconfigure(item, fill=_COL_NOTE_HL if on else _COL_NOTE)
+                color = _COL_NOTE_HL if on else _COL_NOTE
+                if c.type(item) == "oval" and c.itemcget(item, "fill") in (_COL_BG, ""):
+                    c.itemconfigure(item, outline=color)  # tom hueco
+                else:
+                    c.itemconfigure(item, fill=color)
 
         # Cursor clavado en el centro: gracias al relleno lateral, CUALQUIER
         # instante (incluido el inicio) puede quedar exactamente en el medio.
@@ -235,6 +299,6 @@ class ScoreCanvas(ctk.CTkFrame):
         if self._events:
             nearest = min((sec for sec, _ in self._events),
                           key=lambda s: abs(s - seconds))
-            if abs(nearest - seconds) * _PX_PER_SEC <= 18:  # radio del iman (px)
+            if abs(nearest - seconds) * self._px <= 18:  # radio del iman (px)
                 seconds = nearest
         self._on_seek(seconds)

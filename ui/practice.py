@@ -1,29 +1,29 @@
 """
-practice.py — Ventana "Practicar": reproduce la bateria (y opcionalmente el resto
-de la mezcla) y sigue la partitura en tiempo real con un cursor, al BPM/compas que
-elijas.
+practice.py — Ventana "Practicar": reproduce la bateria (y la banda) y sigue la
+partitura en tiempo real con un cursor, al tempo y compas que elijas.
 
-Modo A+B:
-  - BPM y compas detectados se muestran y se pueden cambiar.
-  - Al cambiar el BPM, las pistas se estiran al nuevo tempo SIN cambiar el tono
-    (librosa.effects.time_stretch) y el cursor las sigue sincronizado.
-  - Se mezclan DOS pistas con volumen independiente en vivo: Bateria y "Otros"
-    (sin bateria), para poder guiarse con voces/instrumentos. Los volumenes
-    iniciales vienen del mezclador del panel principal.
-  - Retroceder/avanzar en tiempo real: barra de progreso + clic en la partitura.
-  - Metronomo opcional (pista de click aparte).
+Arquitectura espacial (jerarquia: partitura > transporte > ajustes):
+  fila 0  Titulo | grupo COMPAS (selector + marcar compas 1 + aplicar al PDF)
+  fila 1  PARTITURA (lienzo, se estira; leyenda de carriles; zoom +/-)
+  fila 2  MEZCLA compacta (Bateria, Banda)
+  fila 3  NAVEGACION: inicio / -5s / +5s / barra / tiempo grande
+  fila 4  VELOCIDAD DE LA CANCION | play | METRONOMO (todo el click en UN panel)
+  fila 5  status
 
-Layout: la partitura ocupa el centro; controles abajo, simetricos.
+Dos relojes, nunca confundidos (PRODUCT.md): el panel izquierdo estira el AUDIO
+(porcentaje de la velocidad original); el panel derecho gobierna SOLO el click
+del metronomo (encendido, volumen, pulso cancion/manual, subdivision, acento).
 
 Sincronia: el lienzo dibuja las notas por segundos reales del audio original; el
-cursor se calcula desde la posicion reproducida -> siempre caen juntos. La fraccion
-de avance es invariante al tempo (se conserva al re-estirar).
+cursor se calcula desde la posicion reproducida (menos la latencia de salida
+cuando suena) -> siempre caen juntos. La fraccion de avance es invariante al
+tempo (se conserva al re-estirar).
 """
 
 from __future__ import annotations
 
 import threading
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 import customtkinter as ctk
 import numpy as np
@@ -33,8 +33,6 @@ from ui import theme
 from ui.player import MixPlayer
 from ui.score_view import ScoreCanvas
 
-ACCENT = theme.ACCENT
-ACCENT_HOVER = theme.ACCENT_HOVER
 _PRACTICE_SR = 22050
 _METERS = ["2/4", "3/4", "4/4"]
 _BPM_MIN = 40
@@ -61,43 +59,62 @@ def _make_click_track(
     n_frames: int, sr: int, bpm: float, beats_per_bar: int = 4,
     accent: bool = False, offset_seconds: float = 0.0,
     click_times: Optional[List[float]] = None,
+    subdivision: int = 1,
 ) -> np.ndarray:
     """
-    Click de metronomo (mono).
+    Click de metronomo (mono) con tres intensidades: acento (1er tiempo del
+    compas), pulso normal (negras) y subdivision suave (corcheas intercaladas).
 
-    `click_times`: si se pasa, cada click cae EXACTAMENTE en esos instantes (los
-    beats reales de la cancion, ya estirados al tempo elegido). Asi el metronomo
-    sigue a la banda aunque el tempo fluctue (en vivo). El primer instante de la
-    lista se toma como tiempo 1 del compas.
-
-    Sin `click_times`: rejilla constante cada 60/bpm s desde `offset_seconds`
-    (instante del primer tiempo).
-
-    Si `accent` es True, el primer tiempo de cada compas suena mas fuerte y mas
-    agudo, como guia del inicio de compas.
+    `click_times`: si se pasa, los pulsos caen EXACTAMENTE en esos instantes
+    (beats reales estirados al tempo elegido); la subdivision se interpola entre
+    pulsos consecutivos. Sin `click_times`: rejilla constante cada 60/bpm s
+    desde `offset_seconds`.
     """
     track = np.zeros(n_frames, dtype="float32")
     if n_frames <= 0:
         return track
 
-    click_normal = _click_wave(sr, 1200, 0.5)
-    click_accent = _click_wave(sr, 1800, 0.9) if accent else click_normal
+    wave_accent = _click_wave(sr, 1800, 0.9)
+    wave_normal = _click_wave(sr, 1200, 0.5)
+    wave_weak = _click_wave(sr, 1500, 0.28)
 
+    # Construir (instante_s, tipo) — tipo: 0=acento, 1=normal, 2=suave
+    events: List[Tuple[float, int]] = []
     if click_times:
-        starts = [int(t * sr) for t in click_times if 0.0 <= t * sr < n_frames]
+        for i, t in enumerate(click_times):
+            kind = 0 if (accent and i % beats_per_bar == 0) else 1
+            events.append((t, kind))
+            if subdivision >= 2 and i + 1 < len(click_times):
+                nxt = click_times[i + 1]
+                for k in range(1, subdivision):
+                    events.append((t + (nxt - t) * k / subdivision, 2))
     else:
         if bpm <= 0:
             return track
-        interval = int(sr * 60.0 / bpm)
-        if interval <= 0:
+        beat_len = 60.0 / bpm
+        step = beat_len / max(1, subdivision)
+        if step <= 0:
             return track
-        first = max(0, int(offset_seconds * sr))
-        starts = list(range(first, n_frames, interval))
+        t = max(0.0, offset_seconds)
+        idx = 0
+        while t * sr < n_frames:
+            if idx % subdivision == 0:
+                beat = idx // subdivision
+                kind = 0 if (accent and beat % beats_per_bar == 0) else 1
+            else:
+                kind = 2
+            events.append((t, kind))
+            idx += 1
+            t = max(0.0, offset_seconds) + idx * step
 
-    for beat, start in enumerate(starts):
-        click = click_accent if (accent and beat % beats_per_bar == 0) else click_normal
-        end = min(start + len(click), n_frames)
-        track[start:end] += click[: end - start]
+    waves = {0: wave_accent, 1: wave_normal, 2: wave_weak}
+    for t, kind in events:
+        start = int(t * sr)
+        if not (0 <= start < n_frames):
+            continue
+        wave = waves[kind]
+        end = min(start + len(wave), n_frames)
+        track[start:end] += wave[: end - start]
     return track
 
 
@@ -118,12 +135,13 @@ class PracticeWindow(ctk.CTkToplevel):
                  on_apply: Optional[Callable] = None) -> None:
         super().__init__(master, fg_color=theme.SURFACE1)
         self.title(f"Practicar — {song_name}")
-        self.geometry("1100x700")
-        self.minsize(820, 560)
+        self.geometry("1150x760")
+        self.minsize(900, 620)
 
         self._midi_path = midi_path
         self._drums_wav = drums_wav
         self._no_drums_wav = no_drums_wav
+        self._song_name = song_name
         self.bpm0 = float(bpm) if bpm else 120.0
         self.target_bpm = self.bpm0     # tempo pedido por el slider
         self.rendered_bpm = self.bpm0   # tempo al que esta ESTIRADO el audio actual
@@ -134,7 +152,7 @@ class PracticeWindow(ctk.CTkToplevel):
         # las barras de compas siguen el tempo REAL aunque fluctue (en vivo).
         self.beat_times: List[float] = sorted(beat_times) if beat_times else []
         # Callback para aplicar los ajustes manuales (inicio de compas, compas)
-        # a la partitura PDF: on_apply(beat_offset, beats_per_bar, status_cb).
+        # a la partitura PDF: on_apply(beat_offset, beats_per_bar, status_cb, manual_bpm).
         self._on_apply = on_apply
 
         self.gain_drums = float(drums_gain)
@@ -145,6 +163,7 @@ class PracticeWindow(ctk.CTkToplevel):
         # BPM fijo elegido por el usuario (el click suena a ese ritmo constante).
         self._pulse_mode = "cancion"
         self.custom_bpm = float(int(self.bpm0))
+        self.subdivision = 1    # 1 = negras, 2 = corcheas
 
         self._orig_drums: Optional[np.ndarray] = None
         self._orig_others: Optional[np.ndarray] = None
@@ -171,158 +190,205 @@ class PracticeWindow(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)  # la partitura se estira
 
+        # ---- fila 0: titulo + grupo COMPAS (calibracion de una sola vez) ----
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
+        header.grid(row=0, column=0, sticky="ew", padx=theme.SP_MD,
+                    pady=(theme.SP_MD, theme.SP_SM))
+        header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            header, text="🥁 Practicar en tiempo real",
-            font=ctk.CTkFont(size=16, weight="bold"),
-        ).pack(side="left")
+            header, text=self._song_name, font=theme.f_title(),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
 
-        # Pulso del metronomo: beats reales de la cancion o BPM fijo manual.
-        pulse_box = ctk.CTkFrame(header, fg_color="transparent")
-        pulse_box.pack(side="left", padx=(18, 0))
-        ctk.CTkLabel(pulse_box, text="Pulso", text_color=theme.TEXT_MUTED).pack(
-            side="left", padx=(0, 6)
+        compass = ctk.CTkFrame(header, fg_color="transparent")
+        compass.grid(row=0, column=1, sticky="e")
+        ctk.CTkLabel(compass, text="Compas", text_color=theme.TEXT_MUTED,
+                     font=theme.f_body()).pack(side="left", padx=(0, theme.SP_SM))
+        self.meter_menu = ctk.CTkOptionMenu(
+            compass, values=_METERS, width=78, command=self._on_meter_change,
+            font=theme.f_body(),
         )
+        self.meter_menu.set(f"{self.beats_per_bar}/4")
+        self.meter_menu.pack(side="left", padx=(0, theme.SP_MD))
+        self.mark_btn = ctk.CTkButton(
+            compass, text="Marcar compas 1", height=32, width=140,
+            command=self._on_mark_start, font=theme.f_body(),
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
+        )
+        self.mark_btn.pack(side="left", padx=(0, theme.SP_SM))
+        self.apply_btn = ctk.CTkButton(
+            compass, text="Aplicar al PDF", height=32, width=120,
+            command=self._on_apply_score, font=theme.f_body(),
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
+        )
+        self.apply_btn.pack(side="left")
+
+        # ---- fila 1: partitura + zoom flotante ----
+        self.score = ScoreCanvas(self, fg_color="transparent")
+        self.score.grid(row=1, column=0, sticky="nsew", padx=theme.SP_MD,
+                        pady=(0, theme.SP_SM))
+        self.score.set_seek_callback(self._seek_seconds)
+        zoom = ctk.CTkFrame(self.score, fg_color=theme.SURFACE2,
+                            corner_radius=theme.RAD_CONTROL)
+        zoom.place(relx=1.0, y=6, x=-6, anchor="ne")
+        ctk.CTkButton(zoom, text="−", width=30, height=26,
+                      fg_color="transparent", hover_color=theme.SURFACE4,
+                      font=theme.font(16, bold=True),
+                      command=self.score.zoom_out).pack(side="left")
+        ctk.CTkButton(zoom, text="+", width=30, height=26,
+                      fg_color="transparent", hover_color=theme.SURFACE4,
+                      font=theme.font(16, bold=True),
+                      command=self.score.zoom_in).pack(side="left")
+
+        # ---- fila 2: mezcla compacta (Bateria, Banda) ----
+        mix = ctk.CTkFrame(self, fg_color="transparent")
+        mix.grid(row=2, column=0, sticky="ew", padx=theme.SP_MD, pady=(0, 2))
+        mix.grid_columnconfigure(1, weight=1)
+        mix.grid_columnconfigure(3, weight=1)
+        ctk.CTkLabel(mix, text="Bateria", text_color=theme.TEXT_MUTED,
+                     font=theme.f_body(), width=70, anchor="w").grid(row=0, column=0)
+        self.vol_drums = ctk.CTkSlider(
+            mix, from_=_VOL_MIN, to=_VOL_MAX, number_of_steps=_VOL_MAX - _VOL_MIN,
+            command=self._on_vol_drums)
+        self.vol_drums.set(min(max(self.gain_drums * 100, _VOL_MIN), _VOL_MAX))
+        self.vol_drums.grid(row=0, column=1, sticky="ew", padx=(4, theme.SP_LG))
+        ctk.CTkLabel(mix, text="Banda", text_color=theme.TEXT_MUTED,
+                     font=theme.f_body(), width=60, anchor="w").grid(row=0, column=2)
+        self.vol_others = ctk.CTkSlider(
+            mix, from_=_VOL_MIN, to=_VOL_MAX, number_of_steps=_VOL_MAX - _VOL_MIN,
+            command=self._on_vol_others)
+        self.vol_others.set(min(max(self.gain_others * 100, _VOL_MIN), _VOL_MAX))
+        self.vol_others.grid(row=0, column=3, sticky="ew", padx=(4, 0))
+
+        # ---- fila 3: navegacion temporal ----
+        nav = ctk.CTkFrame(self, fg_color="transparent")
+        nav.grid(row=3, column=0, sticky="ew", padx=theme.SP_MD,
+                 pady=(theme.SP_SM, 0))
+        nav.grid_columnconfigure(3, weight=1)
+        self.restart_btn = ctk.CTkButton(
+            nav, text="⏮", width=44, height=40, corner_radius=theme.RAD_CONTROL,
+            command=self._on_restart, font=theme.font(16),
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
+        )
+        self.restart_btn.grid(row=0, column=0, padx=(0, theme.SP_XS))
+        self.back5_btn = ctk.CTkButton(
+            nav, text="⏪ 5s", width=64, height=40, corner_radius=theme.RAD_CONTROL,
+            command=self._on_back5, font=theme.f_body(),
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
+        )
+        self.back5_btn.grid(row=0, column=1, padx=(0, theme.SP_XS))
+        self.fwd5_btn = ctk.CTkButton(
+            nav, text="5s ⏩", width=64, height=40, corner_radius=theme.RAD_CONTROL,
+            command=self._on_forward5, font=theme.f_body(),
+            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
+        )
+        self.fwd5_btn.grid(row=0, column=2, padx=(0, theme.SP_MD))
+        self.seek = ctk.CTkSlider(nav, from_=0, to=1, command=self._on_seek_slider)
+        self.seek.set(0)
+        self.seek.grid(row=0, column=3, sticky="ew", padx=(0, theme.SP_MD))
+        self.seek.bind("<ButtonPress-1>", lambda e: setattr(self, "_user_seeking", True))
+        self.seek.bind("<ButtonRelease-1>", self._on_seek_release)
+        self.time_cur = ctk.CTkLabel(nav, text="00:00", font=theme.f_value())
+        self.time_cur.grid(row=0, column=4)
+        self.time_total = ctk.CTkLabel(nav, text=" / 00:00",
+                                       text_color=theme.TEXT_MUTED,
+                                       font=theme.f_small())
+        self.time_total.grid(row=0, column=5)
+
+        # ---- fila 4: VELOCIDAD | play | METRONOMO ----
+        panels = ctk.CTkFrame(self, fg_color="transparent")
+        panels.grid(row=4, column=0, sticky="ew", padx=theme.SP_MD,
+                    pady=(theme.SP_SM, theme.SP_SM))
+        panels.grid_columnconfigure(0, weight=1, uniform="pan")
+        panels.grid_columnconfigure(1, weight=0)
+        panels.grid_columnconfigure(2, weight=1, uniform="pan")
+
+        # Panel izquierdo: velocidad del AUDIO (estira la cancion)
+        speed = ctk.CTkFrame(panels, fg_color=theme.SURFACE2,
+                             corner_radius=theme.RAD_PANEL)
+        speed.grid(row=0, column=0, sticky="nsew", padx=(0, theme.SP_MD))
+        ctk.CTkLabel(speed, text="VELOCIDAD DE LA CANCION",
+                     text_color=theme.TEXT_MUTED, font=theme.f_section(),
+                     ).pack(anchor="w", padx=theme.SP_MD, pady=(theme.SP_SM, 0))
+        self.speed_value = ctk.CTkLabel(speed, text="100%  ·  -- BPM",
+                                        font=theme.f_value())
+        self.speed_value.pack(anchor="w", padx=theme.SP_MD)
+        self.bpm_slider = ctk.CTkSlider(
+            speed, from_=_BPM_MIN, to=_BPM_MAX,
+            number_of_steps=_BPM_MAX - _BPM_MIN, command=self._on_bpm_slide,
+        )
+        self.bpm_slider.set(min(max(self.bpm0, _BPM_MIN), _BPM_MAX))
+        self.bpm_slider.pack(fill="x", padx=theme.SP_MD, pady=(2, theme.SP_SM))
+        ctk.CTkButton(speed, text="Restablecer", height=28, width=110,
+                      command=self._reset_bpm, font=theme.f_small(),
+                      fg_color=theme.SURFACE3, hover_color=theme.SURFACE4,
+                      ).pack(anchor="w", padx=theme.SP_MD, pady=(0, theme.SP_SM))
+
+        # Centro: transporte
+        self.play_btn = ctk.CTkButton(
+            panels, text="▶", width=84, height=84, corner_radius=42,
+            command=self._on_play_pause, font=ctk.CTkFont(size=30),
+            fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+            text_color=theme.ON_ACCENT, state="disabled",
+        )
+        self.play_btn.grid(row=0, column=1, padx=theme.SP_SM)
+
+        # Panel derecho: METRONOMO completo (nada del click vive fuera de aqui)
+        met = ctk.CTkFrame(panels, fg_color=theme.SURFACE2,
+                           corner_radius=theme.RAD_PANEL)
+        met.grid(row=0, column=2, sticky="nsew", padx=(theme.SP_MD, 0))
+        met.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(met, text="METRONOMO", text_color=theme.TEXT_MUTED,
+                     font=theme.f_section()).grid(
+            row=0, column=0, columnspan=2, sticky="w",
+            padx=theme.SP_MD, pady=(theme.SP_SM, 2))
+        self.met_switch = ctk.CTkSwitch(
+            met, text="Click", variable=self._metronome,
+            command=self._on_metronome_toggle, font=theme.f_body(), width=90,
+        )
+        self.met_switch.grid(row=1, column=0, sticky="w", padx=theme.SP_MD)
+        self.vol_click = ctk.CTkSlider(
+            met, from_=_VOL_MIN, to=_VOL_MAX, number_of_steps=_VOL_MAX - _VOL_MIN,
+            command=self._on_vol_click)
+        self.vol_click.set(min(max(self.gain_click * 100, _VOL_MIN), _VOL_MAX))
+        self.vol_click.grid(row=1, column=1, sticky="ew",
+                            padx=(0, theme.SP_MD))
+        pulse_row = ctk.CTkFrame(met, fg_color="transparent")
+        pulse_row.grid(row=2, column=0, columnspan=2, sticky="w",
+                       padx=theme.SP_MD, pady=(theme.SP_XS, 0))
         self.pulse_seg = ctk.CTkSegmentedButton(
-            pulse_box, values=["Cancion", "Manual"], command=self._on_pulse_mode,
-            height=28,
+            pulse_row, values=["Cancion", "Manual"], command=self._on_pulse_mode,
+            height=28, font=theme.f_small(),
         )
         self.pulse_seg.set("Cancion")
-        self.pulse_seg.pack(side="left", padx=(0, 6))
-        self.pulse_entry = ctk.CTkEntry(pulse_box, width=52, height=28,
-                                        justify="center")
+        self.pulse_seg.pack(side="left", padx=(0, theme.SP_SM))
+        self.pulse_entry = ctk.CTkEntry(pulse_row, width=54, height=28,
+                                        justify="center", font=theme.f_body())
         self.pulse_entry.insert(0, str(int(self.custom_bpm)))
         self.pulse_entry.pack(side="left")
         self.pulse_entry.bind("<Return>", self._on_custom_bpm_commit)
         self.pulse_entry.bind("<FocusOut>", self._on_custom_bpm_commit)
-        ctk.CTkLabel(pulse_box, text="BPM", text_color=theme.TEXT_FAINT).pack(
-            side="left", padx=(4, 0)
+        ctk.CTkLabel(pulse_row, text="BPM", text_color=theme.TEXT_FAINT,
+                     font=theme.f_small()).pack(side="left", padx=(4, 0))
+        sub_row = ctk.CTkFrame(met, fg_color="transparent")
+        sub_row.grid(row=3, column=0, columnspan=2, sticky="w",
+                     padx=theme.SP_MD, pady=(theme.SP_XS, 0))
+        self.sub_seg = ctk.CTkSegmentedButton(
+            sub_row, values=["Negras", "Corcheas"], command=self._on_subdivision,
+            height=28, font=theme.f_small(),
         )
-
-        # Anclaje manual: pausa donde empieza el compas 1 y marcalo; luego
-        # aplica ese ajuste (y el compas elegido) a la partitura PDF.
-        self.apply_btn = ctk.CTkButton(
-            header, text="📄 Aplicar a la partitura", height=30,
-            command=self._on_apply_score,
-            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
-        )
-        self.apply_btn.pack(side="right", padx=(8, 0))
-        self.mark_btn = ctk.CTkButton(
-            header, text="📍 Marcar aqui el inicio del compas 1", height=30,
-            command=self._on_mark_start,
-            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
-        )
-        self.mark_btn.pack(side="right")
-
-        self.score = ScoreCanvas(self, fg_color="transparent")
-        self.score.grid(row=1, column=0, sticky="nsew", padx=16, pady=6)
-        self.score.set_seek_callback(self._seek_seconds)
-
-        # --- Volumen de pistas (mezcla) ---
-        vol = ctk.CTkFrame(self, fg_color="transparent")
-        vol.grid(row=2, column=0, sticky="ew", padx=16, pady=(2, 0))
-        vol.grid_columnconfigure(0, weight=1, uniform="vol")
-        vol.grid_columnconfigure(1, weight=1, uniform="vol")
-        vol.grid_columnconfigure(2, weight=1, uniform="vol")
-        self._build_vol_slider(vol, 0, "🥁 Bateria", self.gain_drums, self._on_vol_drums)
-        self._build_vol_slider(vol, 1, "🎵 Otros", self.gain_others, self._on_vol_others)
-        self._build_vol_slider(vol, 2, "⏱ Metronomo", self.gain_click, self._on_vol_click)
-
-        # --- Barra de progreso + tiempos ---
-        seekbox = ctk.CTkFrame(self, fg_color="transparent")
-        seekbox.grid(row=3, column=0, sticky="ew", padx=16, pady=(6, 0))
-        seekbox.grid_columnconfigure(1, weight=1)
-        self.time_cur = ctk.CTkLabel(seekbox, text="00:00", text_color="gray70", width=52)
-        self.time_cur.grid(row=0, column=0)
-        self.seek = ctk.CTkSlider(seekbox, from_=0, to=1, command=self._on_seek_slider)
-        self.seek.set(0)
-        self.seek.grid(row=0, column=1, sticky="ew", padx=8)
-        self.seek.bind("<ButtonPress-1>", lambda e: setattr(self, "_user_seeking", True))
-        self.seek.bind("<ButtonRelease-1>", self._on_seek_release)
-        self.time_total = ctk.CTkLabel(seekbox, text="00:00", text_color="gray70", width=52)
-        self.time_total.grid(row=0, column=2)
-
-        # --- Controles (abajo, simetricos: BPM | Play | Compas/Metronomo) ---
-        controls = ctk.CTkFrame(self, fg_color="transparent")
-        controls.grid(row=4, column=0, sticky="ew", padx=16, pady=(8, 12))
-        controls.grid_columnconfigure(0, weight=1, uniform="ctl")
-        controls.grid_columnconfigure(1, weight=0)
-        controls.grid_columnconfigure(2, weight=1, uniform="ctl")
-
-        left = ctk.CTkFrame(controls, fg_color="transparent")
-        left.grid(row=0, column=0, sticky="ew", padx=(0, 12))
-        row1 = ctk.CTkFrame(left, fg_color="transparent")
-        row1.pack(fill="x")
-        ctk.CTkLabel(row1, text="⏱ Tempo", text_color=theme.TEXT_MUTED).pack(side="left")
-        self.bpm_value = ctk.CTkLabel(
-            row1, text=f"{int(self.bpm0)} BPM", font=ctk.CTkFont(size=15, weight="bold")
-        )
-        self.bpm_value.pack(side="right")
-        self.bpm_slider = ctk.CTkSlider(
-            left, from_=_BPM_MIN, to=_BPM_MAX,
-            number_of_steps=_BPM_MAX - _BPM_MIN, command=self._on_bpm_slide,
-        )
-        self.bpm_slider.set(min(max(self.bpm0, _BPM_MIN), _BPM_MAX))
-        self.bpm_slider.pack(fill="x", pady=(4, 4))
-        ctk.CTkButton(left, text="Reset tempo", height=26, command=self._reset_bpm).pack()
-
-        center = ctk.CTkFrame(controls, fg_color="transparent")
-        center.grid(row=0, column=1, padx=18)
-        self.restart_btn = ctk.CTkButton(
-            center, text="⏮", width=44, height=44, corner_radius=22,
-            command=self._on_restart, font=ctk.CTkFont(size=17),
-            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
-        )
-        self.restart_btn.pack(side="left", padx=(0, 8))
-        self.back5_btn = ctk.CTkButton(
-            center, text="⏪ 5s", width=56, height=44, corner_radius=22,
-            command=self._on_back5, font=ctk.CTkFont(size=14),
-            fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
-        )
-        self.back5_btn.pack(side="left", padx=(0, 12))
-        self.play_btn = ctk.CTkButton(
-            center, text="▶", width=72, height=72, corner_radius=36,
-            command=self._on_play_pause, font=ctk.CTkFont(size=26),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            text_color=theme.ON_ACCENT, state="disabled",
-        )
-        self.play_btn.pack(side="left")
-
-        right = ctk.CTkFrame(controls, fg_color="transparent")
-        right.grid(row=0, column=2, sticky="ew", padx=(12, 0))
-        mrow = ctk.CTkFrame(right, fg_color="transparent")
-        mrow.pack(fill="x")
-        ctk.CTkLabel(mrow, text="Compas", text_color=theme.TEXT_MUTED).pack(side="left")
-        self.meter_menu = ctk.CTkOptionMenu(
-            mrow, values=_METERS, width=80, command=self._on_meter_change
-        )
-        self.meter_menu.set(f"{self.beats_per_bar}/4")
-        self.meter_menu.pack(side="right")
+        self.sub_seg.set("Negras")
+        self.sub_seg.pack(side="left", padx=(0, theme.SP_SM))
         ctk.CTkCheckBox(
-            right, text="Metronomo", variable=self._metronome,
-            command=self._on_metronome_toggle,
-        ).pack(anchor="e", pady=(10, 0))
-        ctk.CTkCheckBox(
-            right, text="Acentuar 1er tiempo", variable=self._metronome_accent,
-            command=self._on_metronome_accent_toggle,
-        ).pack(anchor="e", pady=(4, 0))
+            sub_row, text="Acento 1er tiempo", variable=self._metronome_accent,
+            command=self._on_metronome_accent_toggle, font=theme.f_small(),
+        ).pack(side="left")
+        met.grid_rowconfigure(4, minsize=theme.SP_SM)
 
-        self.status = ctk.CTkLabel(self, text="", text_color=theme.TEXT_FAINT)
-        self.status.grid(row=5, column=0, pady=(0, 8))
-
-    def _build_vol_slider(self, parent, col, name, gain, command) -> None:
-        box = ctk.CTkFrame(parent, fg_color="transparent")
-        box.grid(row=0, column=col, sticky="ew", padx=6)
-        ctk.CTkLabel(box, text=name, width=90, anchor="w", text_color=theme.TEXT_MUTED).pack(
-            side="left"
-        )
-        slider = ctk.CTkSlider(
-            box, from_=_VOL_MIN, to=_VOL_MAX,
-            number_of_steps=_VOL_MAX - _VOL_MIN, command=command,
-        )
-        slider.set(min(max(gain * 100, _VOL_MIN), _VOL_MAX))
-        slider.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        # ---- fila 5: status ----
+        self.status = ctk.CTkLabel(self, text="", text_color=theme.TEXT_MUTED,
+                                   font=theme.f_small())
+        self.status.grid(row=5, column=0, pady=(0, theme.SP_SM))
 
     # ------------------------------------------------------------------ carga
     def _load_worker(self) -> None:
@@ -353,12 +419,12 @@ class PracticeWindow(ctk.CTkToplevel):
             beats_per_bar=self.beats_per_bar, beat_offset=self.beat_offset,
         )
         self._update_bars()
-        self.time_total.configure(text=_fmt_time(self._orig_duration))
+        self.time_total.configure(text=f" / {_fmt_time(self._orig_duration)}")
+        self._update_speed_label()
         self._render_buffer(keep_fraction=0.0)
-        self.play_btn.configure(state="normal")
-        self.restart_btn.configure(state="normal")
-        self.back5_btn.configure(state="normal")
-        self.mark_btn.configure(state="normal")
+        for btn in (self.play_btn, self.restart_btn, self.back5_btn,
+                    self.fwd5_btn, self.mark_btn):
+            btn.configure(state="normal")
         if self._on_apply is not None:
             self.apply_btn.configure(state="normal")
         self._set_status("" if self.player.available else "Sin dispositivo de audio.")
@@ -431,6 +497,7 @@ class PracticeWindow(ctk.CTkToplevel):
             # El primer tiempo tambien se estira con el audio.
             offset_seconds=self.beat_offset / rate,
             click_times=click_times,
+            subdivision=self.subdivision,
         )
         self.player.set_tracks(
             [drums, others, click], self._orig_sr,
@@ -451,7 +518,7 @@ class PracticeWindow(ctk.CTkToplevel):
         was_playing = self.player.is_playing
         frac = self.player.fraction()
         self.player.pause()
-        self._set_status("Ajustando tempo...")
+        self._set_status("Ajustando velocidad...")
 
         def work() -> None:
             try:
@@ -471,7 +538,8 @@ class PracticeWindow(ctk.CTkToplevel):
             self.player.play()
             self.play_btn.configure(text="⏸")
         # Si el usuario cambio algo durante el re-render (siguio moviendo el
-        # slider, o cambio compas/acento), re-aplicamos el ultimo estado pedido.
+        # slider, o cambio compas/acento/subdivision), re-aplicamos el ultimo
+        # estado pedido.
         if self._pending_render or abs(self.target_bpm - self.rendered_bpm) >= 1.0:
             self._pending_render = False
             self._bpm_after = self.after(80, self._apply_tempo_async)
@@ -491,9 +559,15 @@ class PracticeWindow(ctk.CTkToplevel):
         if self._metronome.get():
             self.player.set_gain(_T_CLICK, self.gain_click)
 
+    def _update_speed_label(self) -> None:
+        pct = int(round(self.target_bpm / self.bpm0 * 100))
+        self.speed_value.configure(
+            text=f"{pct}%  ·  {int(self.target_bpm)} BPM"
+        )
+
     def _on_bpm_slide(self, value: float) -> None:
         self.target_bpm = float(value)
-        self.bpm_value.configure(text=f"{int(value)} BPM")
+        self._update_speed_label()
         # Re-render con debounce: al dejar de mover el slider, estira el audio.
         if self._bpm_after is not None:
             self.after_cancel(self._bpm_after)
@@ -501,10 +575,10 @@ class PracticeWindow(ctk.CTkToplevel):
 
     def _reset_bpm(self) -> None:
         self.target_bpm = self.bpm0
-        # El "reset" vuelve al tempo REAL de la cancion aunque supere el rango
-        # del slider (1-150); el slider solo se clampea visualmente.
+        # Vuelve al tempo REAL de la cancion aunque supere el rango del slider
+        # (40-220); el slider solo se clampea visualmente.
         self.bpm_slider.set(min(max(self.bpm0, _BPM_MIN), _BPM_MAX))
-        self.bpm_value.configure(text=f"{int(self.bpm0)} BPM")
+        self._update_speed_label()
         self._apply_tempo_async()
 
     def _on_meter_change(self, value: str) -> None:
@@ -532,13 +606,13 @@ class PracticeWindow(ctk.CTkToplevel):
         self._apply_tempo_async()  # re-anclar el acento del metronomo
         self._set_status(
             f"Compas 1 marcado en {_fmt_time(self.beat_offset)} "
-            f"({self.beat_offset:.2f}s). Usa '📄 Aplicar a la partitura' para "
-            "regenerar el PDF con este inicio."
+            f"({self.beat_offset:.2f}s). Usa 'Aplicar al PDF' para regenerar "
+            "la partitura con este inicio."
         )
 
     def _on_apply_score(self) -> None:
         """
-        📄 Regenera la partitura PDF con el inicio de compas y compas elegidos.
+        Regenera la partitura PDF con el inicio de compas y compas elegidos.
         Si el pulso esta en Manual, la partitura se cuantiza con ESA rejilla
         (el BPM fijo que el usuario valido de oido), no con los beats detectados.
         """
@@ -558,6 +632,13 @@ class PracticeWindow(ctk.CTkToplevel):
     def _on_metronome_toggle(self) -> None:
         # El click ya esta como pista aparte: solo cambiamos su volumen en vivo.
         self.player.set_gain(_T_CLICK, self.gain_click if self._metronome.get() else 0.0)
+
+    def _on_metronome_accent_toggle(self) -> None:
+        self._apply_tempo_async()
+
+    def _on_subdivision(self, value: str) -> None:
+        self.subdivision = 2 if value == "Corcheas" else 1
+        self._apply_tempo_async()  # regenerar la pista de click
 
     def _on_pulse_mode(self, value: str) -> None:
         self._pulse_mode = "manual" if value == "Manual" else "cancion"
@@ -579,9 +660,7 @@ class PracticeWindow(ctk.CTkToplevel):
             self._update_bars()
             self._apply_tempo_async()
 
-    def _on_metronome_accent_toggle(self) -> None:
-        self._apply_tempo_async()
-
+    # ------------------------------------------------------------- transporte
     def _on_play_pause(self) -> None:
         if not self.player.loaded:
             return
@@ -596,15 +675,22 @@ class PracticeWindow(ctk.CTkToplevel):
                 self._set_status(f"No se pudo reproducir: {exc}")
 
     def _on_restart(self) -> None:
-        """⏮ Vuelve al inicio (sigue reproduciendo si estaba sonando)."""
+        """Vuelve al inicio (sigue reproduciendo si estaba sonando)."""
         self._seek_seconds(0.0)
 
     def _on_back5(self) -> None:
-        """⏪ Retrocede 5 segundos (en tiempo de la cancion original)."""
+        """Retrocede 5 segundos (en tiempo de la cancion original)."""
         if self._orig_duration <= 0:
             return
         cur = self.player.fraction() * self._orig_duration
         self._seek_seconds(max(0.0, cur - 5.0))
+
+    def _on_forward5(self) -> None:
+        """Avanza 5 segundos (en tiempo de la cancion original)."""
+        if self._orig_duration <= 0:
+            return
+        cur = self.player.fraction() * self._orig_duration
+        self._seek_seconds(min(self._orig_duration, cur + 5.0))
 
     # --- seek ---
     def _seek_seconds(self, original_seconds: float) -> None:
