@@ -30,6 +30,7 @@ import numpy as np
 
 from pipeline.score import extract_drum_events
 from ui import theme
+from ui.icons import icon
 from ui.player import MixPlayer
 from ui.score_view import ScoreCanvas
 
@@ -219,13 +220,15 @@ class PracticeWindow(ctk.CTkToplevel):
                             else f"{self.beats_per_bar}/4")
         self.meter_menu.pack(side="left", padx=(0, theme.SP_MD))
         self.mark_btn = ctk.CTkButton(
-            compass, text="Marcar compas 1", height=32, width=140,
+            compass, text=" Marcar compas 1", image=icon("map-pin", 15),
+            compound="left", height=32, width=150,
             command=self._on_mark_start, font=theme.f_body(),
             fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.mark_btn.pack(side="left", padx=(0, theme.SP_SM))
         self.apply_btn = ctk.CTkButton(
-            compass, text="Aplicar al PDF", height=32, width=120,
+            compass, text=" Aplicar al PDF", image=icon("file-text", 15),
+            compound="left", height=32, width=130,
             command=self._on_apply_score, font=theme.f_body(),
             fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
@@ -274,20 +277,22 @@ class PracticeWindow(ctk.CTkToplevel):
                  pady=(theme.SP_SM, 0))
         nav.grid_columnconfigure(3, weight=1)
         self.restart_btn = ctk.CTkButton(
-            nav, text="⏮", width=44, height=40, corner_radius=theme.RAD_CONTROL,
-            command=self._on_restart, font=theme.font(16),
+            nav, text="", image=icon("skip-back", 18), width=44, height=40,
+            corner_radius=theme.RAD_CONTROL, command=self._on_restart,
             fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.restart_btn.grid(row=0, column=0, padx=(0, theme.SP_XS))
         self.back5_btn = ctk.CTkButton(
-            nav, text="⏪ 5s", width=64, height=40, corner_radius=theme.RAD_CONTROL,
-            command=self._on_back5, font=theme.f_body(),
+            nav, text="5s", image=icon("rewind", 16), compound="left", width=64,
+            height=40, corner_radius=theme.RAD_CONTROL,
+            command=self._on_back5, font=theme.f_small(),
             fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.back5_btn.grid(row=0, column=1, padx=(0, theme.SP_XS))
         self.fwd5_btn = ctk.CTkButton(
-            nav, text="5s ⏩", width=64, height=40, corner_radius=theme.RAD_CONTROL,
-            command=self._on_forward5, font=theme.f_body(),
+            nav, text="5s", image=icon("fast-forward", 16), compound="right",
+            width=64, height=40, corner_radius=theme.RAD_CONTROL,
+            command=self._on_forward5, font=theme.f_small(),
             fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.fwd5_btn.grid(row=0, column=2, padx=(0, theme.SP_MD))
@@ -327,15 +332,16 @@ class PracticeWindow(ctk.CTkToplevel):
         )
         self.bpm_slider.set(min(max(self.bpm0, _BPM_MIN), _BPM_MAX))
         self.bpm_slider.pack(fill="x", padx=theme.SP_MD, pady=(2, theme.SP_SM))
-        ctk.CTkButton(speed, text="Restablecer", height=28, width=110,
+        ctk.CTkButton(speed, text=" Restablecer", image=icon("rotate-ccw", 13),
+                      compound="left", height=28, width=118,
                       command=self._reset_bpm, font=theme.f_small(),
                       fg_color=theme.SURFACE3, hover_color=theme.SURFACE4,
                       ).pack(anchor="w", padx=theme.SP_MD, pady=(0, theme.SP_SM))
 
         # Centro: transporte
         self.play_btn = ctk.CTkButton(
-            panels, text="▶", width=84, height=84, corner_radius=42,
-            command=self._on_play_pause, font=ctk.CTkFont(size=30),
+            panels, text="", image=icon("play", 34, "dark"), width=84, height=84,
+            corner_radius=42, command=self._on_play_pause,
             fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
             text_color=theme.ON_ACCENT, state="disabled",
         )
@@ -551,7 +557,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self._set_status("")
         if resume:
             self.player.play()
-            self.play_btn.configure(text="⏸")
+            self.play_btn.configure(image=icon("pause", 34, "dark"), text="")
         # Si el usuario cambio algo durante el re-render (siguio moviendo el
         # slider, o cambio compas/acento/subdivision), re-aplicamos el ultimo
         # estado pedido.
@@ -693,11 +699,11 @@ class PracticeWindow(ctk.CTkToplevel):
             return
         if self.player.is_playing:
             self.player.pause()
-            self.play_btn.configure(text="▶")
+            self.play_btn.configure(image=icon("play", 34, "dark"), text="")
         else:
             try:
                 self.player.play()
-                self.play_btn.configure(text="⏸")
+                self.play_btn.configure(image=icon("pause", 34, "dark"), text="")
             except Exception as exc:  # noqa: BLE001
                 self._set_status(f"No se pudo reproducir: {exc}", error=True)
 
@@ -750,7 +756,7 @@ class PracticeWindow(ctk.CTkToplevel):
             if not self._user_seeking:
                 self.seek.set(self.player.fraction())
             if self.player.finished and not self.player.is_playing:
-                self.play_btn.configure(text="▶")
+                self.play_btn.configure(image=icon("play", 34, "dark"), text="")
         self.after(33, self._tick)
 
     # ------------------------------------------------------------------ teclado
