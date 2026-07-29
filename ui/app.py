@@ -165,7 +165,7 @@ class DrumlyApp(ctk.CTk):
         # --- Pista: Bateria ---
         self._build_track_row(f, "🥁", "Bateria", self._on_vol_drums)
         # --- Pista: Otros (sin bateria) ---
-        self._build_track_row(f, "🎵", "Otros", self._on_vol_no_drums)
+        self._build_track_row(f, "🎵", "Banda", self._on_vol_no_drums)
 
         # espacio flexible
         ctk.CTkFrame(f, fg_color="transparent", height=40).pack(expand=True, fill="both")
@@ -486,8 +486,10 @@ class DrumlyApp(ctk.CTk):
         entries = history.load(OUTPUT_DIR)
         if not entries:
             ctk.CTkLabel(
-                self.history_frame, text="Aun no hay transcripciones.",
-                text_color=theme.TEXT_FAINT,
+                self.history_frame,
+                text="Aun no hay transcripciones.\nSelecciona un audio arriba "
+                     "para crear la primera.",
+                text_color=theme.TEXT_FAINT, font=theme.f_small(),
             ).pack(pady=12)
             return
         valid_fields = {fld.name for fld in _dc_fields(PipelineResult)}
@@ -591,7 +593,7 @@ class ExportDialog(ctk.CTkToplevel):
 
     def __init__(self, master, result: PipelineResult, player: DualTrackPlayer) -> None:
         super().__init__(master)
-        self.title("Export")
+        self.title("Exportar")
         self.geometry("360x260")
         self.result = result
         self.player = player
@@ -599,7 +601,7 @@ class ExportDialog(ctk.CTkToplevel):
         self.grab_set()
 
         ctk.CTkLabel(
-            self, text="Exportar", font=ctk.CTkFont(size=18, weight="bold")
+            self, text="Exportar", font=theme.f_title()
         ).pack(pady=(18, 12))
 
         ctk.CTkButton(
