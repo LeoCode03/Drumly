@@ -19,7 +19,8 @@ Como notas y cursor usan la misma funcion tiempo->X, la sincronia es exacta.
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional, Tuple
+import bisect
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import customtkinter as ctk
 
@@ -71,10 +72,12 @@ class ScoreCanvas(ctk.CTkFrame):
         self._bar_times: List[float] = []  # barras en tiempos REALES (prioridad)
         self._px = _PX_DEFAULT         # zoom horizontal (px por segundo)
         self._width = _MARGIN_L
-        self._note_items: List[Tuple[int, float]] = []
+        self._note_items: List[Tuple[int, float]] = []  # ordenados por tiempo
+        self._note_secs: List[float] = []               # paralelo, para bisect
         self._cursor = None
-        self._hl_state: Dict[int, bool] = {}
+        self._hl_on: Set[int] = set()   # indices de notas resaltadas ahora
         self._cursor_seconds = 0.0
+        self._cursor_drawn = -1.0       # ultimo instante dibujado (early-return)
         self._on_seek: Optional[Callable[[float], None]] = None
 
         # Geometria del pentagrama (se recalcula segun el alto)
@@ -94,9 +97,17 @@ class ScoreCanvas(ctk.CTkFrame):
                 font=theme.font(12), fg_color=_COL_BG, height=14,
             )
 
-        self._canvas.bind("<Configure>", lambda e: self._redraw())
+        self._resize_after = None
+        self._canvas.bind("<Configure>", self._on_configure)
         self._canvas.bind("<Button-1>", self._on_click)
         self._canvas.bind("<B1-Motion>", self._on_click)
+
+    def _on_configure(self, _event) -> None:
+        # Debounce: al redimensionar llegan rafagas de eventos; reconstruir el
+        # lienzo completo una sola vez, 80 ms despues del ultimo.
+        if self._resize_after is not None:
+            self.after_cancel(self._resize_after)
+        self._resize_after = self.after(80, self._redraw)
 
     # ------------------------------------------------------------------ datos
     def set_events(
@@ -189,7 +200,9 @@ class ScoreCanvas(ctk.CTkFrame):
         self._recompute_staff()
         c.delete("all")
         self._note_items.clear()
-        self._hl_state.clear()
+        self._note_secs.clear()
+        self._hl_on.clear()
+        self._cursor_drawn = -1.0
         view_w = max(c.winfo_width(), 1)
         self._pad = view_w // 2
         total_w = self._width + 2 * self._pad
@@ -240,7 +253,7 @@ class ScoreCanvas(ctk.CTkFrame):
                 item = c.create_oval(x - r, y - r, x + r, y + r,
                                      fill=_COL_NOTE, outline="")
             self._note_items.append((item, seconds))
-            self._hl_state[item] = False
+            self._note_secs.append(seconds)
 
         self._cursor = c.create_line(
             _MARGIN_L, top_ext - 6, _MARGIN_L, y1 + 18, fill=_COL_CURSOR, width=3
@@ -262,20 +275,30 @@ class ScoreCanvas(ctk.CTkFrame):
         self._cursor_seconds = seconds
         if self._cursor is None or not self._lines:
             return
+        # Early-return: en pausa el tick manda el mismo instante 30 veces/s;
+        # no hay nada que mover ni resaltar.
+        if abs(seconds - self._cursor_drawn) < 1e-9:
+            return
+        self._cursor_drawn = seconds
         c = self._canvas
         x = self._x(seconds)
         top_ext = self._lane_y["cymbal"] - self._note_r - 10
         c.coords(self._cursor, x, top_ext, x, self._lines[-1] + 18)
 
-        for item, sec in self._note_items:
-            on = abs(sec - seconds) <= 0.06
-            if on != self._hl_state.get(item, False):
-                self._hl_state[item] = on
-                color = _COL_NOTE_HL if on else _COL_NOTE
-                if c.type(item) == "oval" and c.itemcget(item, "fill") in (_COL_BG, ""):
-                    c.itemconfigure(item, outline=color)  # tom hueco
-                else:
-                    c.itemconfigure(item, fill=color)
+        # Resaltado O(log n): solo la ventana [t-0.06, t+0.06] via bisect, mas
+        # apagar las que salieron de ella (antes se recorrian TODAS las notas
+        # en cada tick).
+        lo = bisect.bisect_left(self._note_secs, seconds - 0.06)
+        hi = bisect.bisect_right(self._note_secs, seconds + 0.06)
+        new_on = set(range(lo, hi))
+        for i in self._hl_on ^ new_on:  # las que cambian de estado
+            item = self._note_items[i][0]
+            color = _COL_NOTE_HL if i in new_on else _COL_NOTE
+            if c.type(item) == "oval" and c.itemcget(item, "fill") in (_COL_BG, ""):
+                c.itemconfigure(item, outline=color)  # tom hueco
+            else:
+                c.itemconfigure(item, fill=color)
+        self._hl_on = new_on
 
         # Cursor clavado en el centro: gracias al relleno lateral, CUALQUIER
         # instante (incluido el inicio) puede quedar exactamente en el medio.

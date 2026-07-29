@@ -120,7 +120,10 @@ def _make_click_track(
 
 def _stretch(y: np.ndarray, rate: float) -> np.ndarray:
     if abs(rate - 1.0) < 1e-3:
-        return y.copy()
+        # Sin copia: las pistas nunca se mutan (la mezcla se acumula en un
+        # buffer nuevo del callback), asi que compartir memoria es seguro y
+        # ahorra ~decenas de MB por re-render a tempo original.
+        return y
     import librosa
     return librosa.effects.time_stretch(y, rate=rate).astype("float32")
 
