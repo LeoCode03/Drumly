@@ -41,30 +41,30 @@ def transcribe(
             progress(msg)
 
     if not os.path.isfile(drums_wav):
-        raise FileNotFoundError(f"No existe el WAV de bateria: {drums_wav}")
+        raise FileNotFoundError(f"Drum WAV not found: {drums_wav}")
 
     try:
         from adtof_pytorch import transcribe_to_midi
     except ImportError as exc:  # mensaje claro para la UI
         raise ImportError(
-            "No se pudo importar ADTOF-pytorch. Instalalo con:\n"
+            "Could not import ADTOF-pytorch. Install it with:\n"
             "  pip install git+https://github.com/xavriley/ADTOF-pytorch.git\n"
-            f"(detalle: {exc})"
+            f"(details: {exc})"
         ) from exc
 
     os.makedirs(os.path.dirname(os.path.abspath(midi_out)) or ".", exist_ok=True)
 
     device = _pick_device()
-    report(f"Transcribiendo bateria a MIDI (ADTOF, {device.upper()})...")
+    report(f"Transcribing drums to MIDI (ADTOF, {device.upper()})...")
     result_path = transcribe_to_midi(drums_wav, midi_out, device=device)
 
     out = str(result_path)
     if not os.path.isfile(out):
         raise RuntimeError(
-            "ADTOF no genero ningun MIDI. Revisa que el WAV contenga bateria."
+            "ADTOF did not produce any MIDI. Check that the WAV contains drums."
         )
 
-    report("MIDI de bateria listo.")
+    report("Drum MIDI ready.")
     return out
 
 
@@ -72,9 +72,9 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Uso: python -m pipeline.transcriber <drums.wav> [salida.mid]")
+        print("Usage: python -m pipeline.transcriber <drums.wav> [output.mid]")
         raise SystemExit(1)
 
     wav = sys.argv[1]
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.splitext(wav)[0] + ".mid"
-    print("MIDI generado:", transcribe(wav, out, progress=print))
+    print("MIDI generated:", transcribe(wav, out, progress=print))

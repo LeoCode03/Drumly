@@ -62,7 +62,7 @@ class DrumlyApp(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("green")
 
-        self.title("Drumly — Transcriptor de bateria")
+        self.title("Drumly — Drum Transcriber")
         self.geometry("480x760")
         self.minsize(440, 680)
 
@@ -100,22 +100,22 @@ class DrumlyApp(ctk.CTk):
             pady=(10, 4)
         )
         ctk.CTkLabel(
-            f, text="De MP3/WAV a partitura de bateria en PDF", text_color=theme.TEXT_MUTED
+            f, text="From MP3/WAV to a drum score PDF", text_color=theme.TEXT_MUTED
         ).pack(pady=(0, 24))
 
         self.select_btn = ctk.CTkButton(
-            f, text=" Seleccionar archivo de audio", image=icon("file-music", 18),
+            f, text=" Select audio file", image=icon("file-music", 18),
             compound="left", command=self._on_select, height=40, font=theme.f_body()
         )
         self.select_btn.pack(pady=(0, 8), fill="x")
 
         self.file_label = ctk.CTkLabel(
-            f, text="Ningun archivo seleccionado", text_color=theme.TEXT_FAINT
+            f, text="No file selected", text_color=theme.TEXT_FAINT
         )
         self.file_label.pack(pady=(0, 16))
 
         self.start_btn = ctk.CTkButton(
-            f, text=" Generar partitura", image=icon("file-text", 18, "dark"),
+            f, text=" Generate score", image=icon("file-text", 18, "dark"),
             compound="left", command=self._on_start, state="disabled",
             height=44, fg_color=ACCENT, hover_color=ACCENT_HOVER,
             text_color=theme.ON_ACCENT, font=theme.font(16, bold=True),
@@ -124,7 +124,7 @@ class DrumlyApp(ctk.CTk):
 
         self.show_rests_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
-            f, text="Mostrar silencios en la partitura", variable=self.show_rests_var
+            f, text="Show rests in the score", variable=self.show_rests_var
         ).pack(pady=(0, 18))
 
         self.progress = ctk.CTkProgressBar(f, mode="indeterminate")
@@ -143,10 +143,10 @@ class DrumlyApp(ctk.CTk):
         hist_head = ctk.CTkFrame(f, fg_color="transparent")
         hist_head.pack(fill="x", pady=(6, 4))
         ctk.CTkLabel(
-            hist_head, text="Historial", font=ctk.CTkFont(size=14, weight="bold")
+            hist_head, text="History", font=ctk.CTkFont(size=14, weight="bold")
         ).pack(side="left")
         ctk.CTkButton(
-            hist_head, text="Eliminar duplicados", width=140, height=26,
+            hist_head, text="Remove duplicates", width=140, height=26,
             fg_color=theme.SURFACE4, hover_color=theme.SURFACE4, command=self._on_dedupe,
         ).pack(side="right")
 
@@ -173,9 +173,9 @@ class DrumlyApp(ctk.CTk):
         self.song_title.pack(side="left", expand=True)
 
         # --- Pista: Bateria ---
-        self._build_track_row(f, "drum", "Bateria", self._on_vol_drums)
+        self._build_track_row(f, "drum", "Drums", self._on_vol_drums)
         # --- Pista: Otros (sin bateria) ---
-        self._build_track_row(f, "music", "Banda", self._on_vol_no_drums)
+        self._build_track_row(f, "music", "Band", self._on_vol_no_drums)
 
         # espacio flexible
         ctk.CTkFrame(f, fg_color="transparent", height=40).pack(expand=True, fill="both")
@@ -223,12 +223,12 @@ class DrumlyApp(ctk.CTk):
             command=self._on_open_pdf,
             fg_color="transparent", hover_color=theme.SURFACE3,
         ).pack()
-        ctk.CTkLabel(pdf_box, text="Partitura", text_color=theme.TEXT_MUTED,
+        ctk.CTkLabel(pdf_box, text="Score", text_color=theme.TEXT_MUTED,
                      font=theme.f_small()).pack()
 
         # --- Practicar en tiempo real: LA accion primaria del producto ---
         self.practice_btn = ctk.CTkButton(
-            f, text=" Practicar en tiempo real", image=icon("target", 20, "dark"),
+            f, text=" Practice in real time", image=icon("target", 20, "dark"),
             compound="left", command=self._on_practice,
             height=48, corner_radius=theme.RAD_PILL,
             fg_color=ACCENT, hover_color=ACCENT_HOVER,
@@ -238,7 +238,7 @@ class DrumlyApp(ctk.CTk):
 
         # --- Re-transcribir (sin repetir la separacion de Demucs) ---
         self.retrans_btn = ctk.CTkButton(
-            f, text=" Re-transcribir", image=icon("refresh-cw", 16),
+            f, text=" Re-transcribe", image=icon("refresh-cw", 16),
             compound="left", command=self._on_retranscribe,
             height=36, corner_radius=18, fg_color=theme.SURFACE3,
             hover_color=theme.SURFACE4, font=theme.f_body(),
@@ -247,7 +247,7 @@ class DrumlyApp(ctk.CTk):
 
         # --- Exportar (accion secundaria: neutra, no compite con Practicar) ---
         self.export_btn = ctk.CTkButton(
-            f, text=" Exportar", image=icon("download", 16), compound="left",
+            f, text=" Export", image=icon("download", 16), compound="left",
             command=self._on_export, height=40,
             corner_radius=theme.RAD_PILL, fg_color=theme.SURFACE3,
             hover_color=theme.SURFACE4, font=theme.f_body(),
@@ -291,8 +291,8 @@ class DrumlyApp(ctk.CTk):
     # ----------------------------------------------------------------- eventos
     def _on_select(self) -> None:
         path = filedialog.askopenfilename(
-            title="Selecciona una cancion",
-            filetypes=[("Audio", "*.mp3 *.wav"), ("Todos", "*.*")],
+            title="Select a song",
+            filetypes=[("Audio", "*.mp3 *.wav"), ("All files", "*.*")],
         )
         if not path:
             return
@@ -339,7 +339,7 @@ class DrumlyApp(ctk.CTk):
                 self.player.play()
                 self.play_btn.configure(image=icon("pause", 26), text="")
             except Exception as exc:  # noqa: BLE001
-                self.mixer_msg.configure(text=f"No se pudo reproducir: {exc}")
+                self.mixer_msg.configure(text=f"Could not play: {exc}")
 
     def _on_export(self) -> None:
         if not self._result:
@@ -399,7 +399,7 @@ class DrumlyApp(ctk.CTk):
         ajuste en el resultado y el historial.
         """
         if not self._result:
-            status_cb("No hay transcripcion activa.")
+            status_cb("No active transcription.")
             return
         prev = self._result
         show_rests = bool(self.show_rests_var.get())
@@ -420,7 +420,7 @@ class DrumlyApp(ctk.CTk):
                     self._refresh_history()
                     bpm_txt = f"{result.bpm} BPM" if result.bpm else "-- BPM"
                     self.bpm_label.configure(text=f"{bpm_txt} · {result.meter}")
-                    status_cb("Partitura regenerada con el nuevo inicio/compas.")
+                    status_cb("Score regenerated with the new start/time signature.")
                 self.after(0, done)
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc)
@@ -504,7 +504,7 @@ class DrumlyApp(ctk.CTk):
         try:
             self.player.load(result.drums_wav, result.no_drums_wav)
         except Exception as exc:  # noqa: BLE001
-            self.mixer_msg.configure(text=f"Audio no disponible: {exc}")
+            self.mixer_msg.configure(text=f"Audio unavailable: {exc}")
 
         self.song_title.configure(text=result.song_name)
         bpm_txt = f"{result.bpm} BPM" if result.bpm else "-- BPM"
@@ -514,7 +514,7 @@ class DrumlyApp(ctk.CTk):
         self.seek.set(0)
         self.play_btn.configure(image=icon("play", 26), text="")
         self.mixer_msg.configure(
-            text="" if self.player.available else "Sin dispositivo de audio para reproducir."
+            text="" if self.player.available else "No audio device available for playback."
         )
         self._show_mixer()
 
@@ -526,8 +526,8 @@ class DrumlyApp(ctk.CTk):
         if not entries:
             ctk.CTkLabel(
                 self.history_frame,
-                text="Aun no hay transcripciones.\nSelecciona un audio arriba "
-                     "para crear la primera.",
+                text="No transcriptions yet.\nSelect an audio file above "
+                     "to create the first one.",
                 text_color=theme.TEXT_FAINT, font=theme.f_small(),
             ).pack(pady=12)
             return
@@ -557,11 +557,11 @@ class DrumlyApp(ctk.CTk):
         try:
             result = PipelineResult(**data)
         except Exception as exc:  # noqa: BLE001
-            self.error_label.configure(text=f"Entrada invalida: {exc}")
+            self.error_label.configure(text=f"Invalid entry: {exc}")
             return
         if not (os.path.isfile(result.drums_wav) or os.path.isfile(result.score_pdf)):
             self.error_label.configure(
-                text="Faltan los archivos de esta transcripcion (¿carpeta borrada?).",
+                text="The files for this transcription are missing (folder deleted?).",
                 text_color=theme.DANGER,
             )
             return
@@ -576,7 +576,7 @@ class DrumlyApp(ctk.CTk):
             self._refresh_history()
             return
         btn._armed = True
-        btn.configure(text="Borrar?", width=70, fg_color=theme.DANGER,
+        btn.configure(text="Delete?", width=70, fg_color=theme.DANGER,
                       text_color=theme.ON_ACCENT)
         def disarm() -> None:
             if btn.winfo_exists():
@@ -589,8 +589,8 @@ class DrumlyApp(ctk.CTk):
         removed = history.dedupe(OUTPUT_DIR)
         self._refresh_history()
         self.error_label.configure(
-            text=(f"Se quitaron {removed} duplicados." if removed
-                  else "No habia duplicados."),
+            text=(f"Removed {removed} duplicates." if removed
+                  else "No duplicates found."),
             text_color=theme.TEXT_MUTED if not removed else theme.ACCENT,
         )
 
@@ -609,7 +609,7 @@ class DrumlyApp(ctk.CTk):
         self._refresh_history()
         self._display_result(result)
         self.mixer_msg.configure(
-            text="Transcripcion regenerada", text_color=theme.ACCENT
+            text="Transcription regenerated", text_color=theme.ACCENT
         )
 
     def _on_retranscribe_error(self, message: str) -> None:
@@ -648,7 +648,7 @@ class ExportDialog(ctk.CTkToplevel):
 
     def __init__(self, master, result: PipelineResult, player: DualTrackPlayer) -> None:
         super().__init__(master, fg_color=theme.SURFACE1)
-        self.title("Exportar")
+        self.title("Export")
         self.geometry("380x280")
         self.minsize(380, 280)
         self.result = result
@@ -658,17 +658,17 @@ class ExportDialog(ctk.CTkToplevel):
         self.bind("<Escape>", lambda e: self.destroy())
 
         ctk.CTkLabel(
-            self, text="Exportar", font=theme.f_title()
+            self, text="Export", font=theme.f_title()
         ).pack(pady=(18, 12))
 
         ctk.CTkButton(
-            self, text=" Mezcla de audio (WAV)", image=icon("audio-lines", 18), compound="left", height=42, command=self._export_mix
+            self, text=" Audio mix (WAV)", image=icon("audio-lines", 18), compound="left", height=42, command=self._export_mix
         ).pack(fill="x", padx=20, pady=6)
         ctk.CTkButton(
-            self, text=" Partitura PDF", image=icon("file-text", 18), compound="left", height=42, command=self._export_pdf
+            self, text=" Score PDF", image=icon("file-text", 18), compound="left", height=42, command=self._export_pdf
         ).pack(fill="x", padx=20, pady=6)
         ctk.CTkButton(
-            self, text=" Abrir carpeta de la cancion", image=icon("folder-open", 18), compound="left", height=42,
+            self, text=" Open song folder", image=icon("folder-open", 18), compound="left", height=42,
             command=self._open_folder,
         ).pack(fill="x", padx=20, pady=6)
 
@@ -678,7 +678,7 @@ class ExportDialog(ctk.CTkToplevel):
     def _export_mix(self) -> None:
         default = os.path.join(self.result.song_dir, f"{self.result.song_name}_mezcla.wav")
         path = filedialog.asksaveasfilename(
-            parent=self, title="Guardar mezcla", defaultextension=".wav",
+            parent=self, title="Save mix", defaultextension=".wav",
             initialfile=os.path.basename(default), initialdir=self.result.song_dir,
             filetypes=[("WAV", "*.wav")],
         )
@@ -686,20 +686,20 @@ class ExportDialog(ctk.CTkToplevel):
             return
         try:
             self.player.render_mix(path)
-            self.msg.configure(text=f"Mezcla guardada:\n{os.path.basename(path)}")
+            self.msg.configure(text=f"Mix saved:\n{os.path.basename(path)}")
         except Exception as exc:  # noqa: BLE001
             self.msg.configure(text=f"Error: {exc}")
 
     def _export_pdf(self) -> None:
         if os.path.isfile(self.result.score_pdf):
             _open_path(self.result.score_pdf)
-            self.msg.configure(text="Abriendo PDF...")
+            self.msg.configure(text="Opening PDF...")
         else:
-            self.msg.configure(text="No se encontro el PDF.")
+            self.msg.configure(text="PDF not found.")
 
     def _open_folder(self) -> None:
         _open_path(self.result.song_dir)
-        self.msg.configure(text="Abriendo carpeta...")
+        self.msg.configure(text="Opening folder...")
 
 
 def launch() -> None:

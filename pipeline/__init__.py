@@ -85,7 +85,7 @@ def run_pipeline(
     transcribe(drums_wav, drums_mid, progress=progress)
     # 3. BPM + compas + beats reales (antes del PDF, para notarlo bien)
     if progress:
-        progress("Estimando BPM y compas...")
+        progress("Estimating BPM and time signature...")
     bpm, beats_per_bar, beat_offset, beat_times = estimate_tempo_and_meter(drums_wav)
     # 4. Partitura PDF: cuantizada sobre los beats REALES (sigue el tempo aunque
     #    fluctue) y anclada al inicio del compas 1
@@ -123,7 +123,7 @@ def retranscribe(
     """
     transcribe(prev.drums_wav, prev.drums_mid, progress=progress)
     if progress:
-        progress("Estimando BPM y compas...")
+        progress("Estimating BPM and time signature...")
     bpm, beats_per_bar, beat_offset, beat_times = estimate_tempo_and_meter(prev.drums_wav)
     score_pdf = midi_to_pdf(
         prev.drums_mid, prev.score_pdf, progress=progress,

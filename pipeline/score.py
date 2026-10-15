@@ -136,17 +136,17 @@ def _resolve_lilypond() -> str:
     candidates = _lilypond_candidates()
     if not candidates:
         raise FileNotFoundError(
-            "No se encontro 'lilypond'. Instalalo y agregalo al PATH "
-            "(ver README.md). Windows: https://lilypond.org/download.html"
+            "'lilypond' not found. Install it and add it to your PATH "
+            "(see README.md). Windows: https://lilypond.org/download.html"
         )
     for path in candidates:
         if _lilypond_runs(path):
             return path
     raise RuntimeError(
-        "LilyPond esta instalado pero no arranca (instalacion danada o bloqueada). "
-        "Rutas probadas: " + " | ".join(candidates) + ".\n"
-        "Reinstalalo (ver README.md) o define la variable de entorno "
-        "DRUMLY_LILYPOND con la ruta a un lilypond.exe que funcione."
+        "LilyPond is installed but fails to start (damaged or blocked installation). "
+        "Paths tried: " + " | ".join(candidates) + ".\n"
+        "Reinstall it (see README.md) or set the DRUMLY_LILYPOND environment "
+        "variable to the path of a working lilypond.exe."
     )
 
 
@@ -316,8 +316,8 @@ def _grid_to_drummode(
     """
     if not grid:
         raise ValueError(
-            "No se detectaron golpes de bateria en el MIDI. "
-            "La cancion puede no tener bateria o la transcripcion fallo."
+            "No drum hits were detected in the MIDI. "
+            "The song may not contain drums or the transcription failed."
         )
 
     rest_char = "r" if show_rests else "s"
@@ -341,7 +341,7 @@ def _write_lilypond(
 
 \\header {{
   title = "{title}"
-  composer = "Transcrito con Drumly"
+  composer = "Transcribed with Drumly"
   tagline = ##f
 }}
 
@@ -389,12 +389,12 @@ def midi_to_pdf(
 
     lilypond = _resolve_lilypond()
 
-    report("Leyendo MIDI...")
+    report("Reading MIDI...")
     events, tempo = _extract_events(
         midi_path, bpm=bpm, beat_offset=beat_offset, beat_times=beat_times
     )
 
-    report("Cuantizando golpes...")
+    report("Quantizing hits...")
     events = _shift_pickup_to_full_bars(events, beats_per_bar)
     grid = _build_grid(events)
     drummode = _grid_to_drummode(grid, beats_per_bar=beats_per_bar, show_rests=show_rests)
@@ -409,7 +409,7 @@ def midi_to_pdf(
     _write_lilypond(drummode, tempo, title, ly_path, beats_per_bar=beats_per_bar,
                     time_label=time_label)
 
-    report("Generando partitura con LilyPond...")
+    report("Generating score with LilyPond...")
     result = subprocess.run(
         [lilypond, "--pdf", "-o", out_base, ly_path],
         capture_output=True,
@@ -417,12 +417,12 @@ def midi_to_pdf(
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
-        msg = f"LilyPond fallo al generar el PDF (codigo {result.returncode})."
+        msg = f"LilyPond failed to generate the PDF (code {result.returncode})."
         if not detail:
             msg += (
-                "\nLilyPond no devolvio ningun mensaje: normalmente significa que su "
-                "instalacion esta danada/bloqueada y no arranca. Reinstala LilyPond "
-                "(ver README.md) o define DRUMLY_LILYPOND con un lilypond.exe que funcione."
+                "\nLilyPond returned no message: this usually means its "
+                "installation is damaged/blocked and will not start. Reinstall LilyPond "
+                "(see README.md) or set DRUMLY_LILYPOND to a working lilypond.exe."
             )
         else:
             msg += "\n" + detail
@@ -430,9 +430,9 @@ def midi_to_pdf(
 
     pdf_path = out_base + ".pdf"
     if not os.path.isfile(pdf_path):
-        raise RuntimeError("LilyPond termino pero no se encontro el PDF de salida.")
+        raise RuntimeError("LilyPond finished but the output PDF was not found.")
 
-    report("Partitura lista.")
+    report("Score ready.")
     return pdf_path
 
 
@@ -440,10 +440,10 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Uso: python -m pipeline.score <archivo.mid> [salida.pdf]")
+        print("Usage: python -m pipeline.score <file.mid> [output.pdf]")
         raise SystemExit(1)
 
     midi = sys.argv[1]
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.splitext(midi)[0] + "_partitura.pdf"
     pdf = midi_to_pdf(midi, out, progress=print)
-    print("PDF generado:", pdf)
+    print("PDF generated:", pdf)

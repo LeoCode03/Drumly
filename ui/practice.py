@@ -139,7 +139,7 @@ class PracticeWindow(ctk.CTkToplevel):
                  on_apply: Optional[Callable] = None,
                  meter_label: str = "") -> None:
         super().__init__(master, fg_color=theme.SURFACE1)
-        self.title(f"Practicar — {song_name}")
+        self.title(f"Practice — {song_name}")
         self.geometry("1150x760")
         self.minsize(900, 620)
 
@@ -189,7 +189,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._bind_keys()
-        self._set_status("Cargando audio...")
+        self._set_status("Loading audio...")
         threading.Thread(target=self._load_worker, daemon=True).start()
         self.after(16, self._tick)
 
@@ -210,7 +210,7 @@ class PracticeWindow(ctk.CTkToplevel):
 
         compass = ctk.CTkFrame(header, fg_color="transparent")
         compass.grid(row=0, column=1, sticky="e")
-        ctk.CTkLabel(compass, text="Compas", text_color=theme.TEXT_MUTED,
+        ctk.CTkLabel(compass, text="Time sig.", text_color=theme.TEXT_MUTED,
                      font=theme.f_body()).pack(side="left", padx=(0, theme.SP_SM))
         self.meter_menu = ctk.CTkOptionMenu(
             compass, values=_METERS, width=78, command=self._on_meter_change,
@@ -220,14 +220,14 @@ class PracticeWindow(ctk.CTkToplevel):
                             else f"{self.beats_per_bar}/4")
         self.meter_menu.pack(side="left", padx=(0, theme.SP_MD))
         self.mark_btn = ctk.CTkButton(
-            compass, text=" Marcar compas 1", image=icon("map-pin", 15),
+            compass, text=" Mark bar 1", image=icon("map-pin", 15),
             compound="left", height=32, width=150,
             command=self._on_mark_start, font=theme.f_body(),
             fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
         )
         self.mark_btn.pack(side="left", padx=(0, theme.SP_SM))
         self.apply_btn = ctk.CTkButton(
-            compass, text=" Aplicar al PDF", image=icon("file-text", 15),
+            compass, text=" Apply to PDF", image=icon("file-text", 15),
             compound="left", height=32, width=130,
             command=self._on_apply_score, font=theme.f_body(),
             fg_color=theme.SURFACE3, hover_color=theme.SURFACE4, state="disabled",
@@ -256,14 +256,14 @@ class PracticeWindow(ctk.CTkToplevel):
         mix.grid(row=2, column=0, sticky="ew", padx=theme.SP_MD, pady=(0, 2))
         mix.grid_columnconfigure(1, weight=1)
         mix.grid_columnconfigure(3, weight=1)
-        ctk.CTkLabel(mix, text="Bateria", text_color=theme.TEXT_MUTED,
+        ctk.CTkLabel(mix, text="Drums", text_color=theme.TEXT_MUTED,
                      font=theme.f_body(), width=70, anchor="w").grid(row=0, column=0)
         self.vol_drums = ctk.CTkSlider(
             mix, from_=_VOL_MIN, to=_VOL_MAX, number_of_steps=_VOL_MAX - _VOL_MIN,
             command=self._on_vol_drums)
         self.vol_drums.set(min(max(self.gain_drums * 100, _VOL_MIN), _VOL_MAX))
         self.vol_drums.grid(row=0, column=1, sticky="ew", padx=(4, theme.SP_LG))
-        ctk.CTkLabel(mix, text="Banda", text_color=theme.TEXT_MUTED,
+        ctk.CTkLabel(mix, text="Band", text_color=theme.TEXT_MUTED,
                      font=theme.f_body(), width=60, anchor="w").grid(row=0, column=2)
         self.vol_others = ctk.CTkSlider(
             mix, from_=_VOL_MIN, to=_VOL_MAX, number_of_steps=_VOL_MAX - _VOL_MIN,
@@ -320,7 +320,7 @@ class PracticeWindow(ctk.CTkToplevel):
         speed = ctk.CTkFrame(panels, fg_color=theme.SURFACE2,
                              corner_radius=theme.RAD_PANEL)
         speed.grid(row=0, column=0, sticky="nsew", padx=(0, theme.SP_MD))
-        ctk.CTkLabel(speed, text="VELOCIDAD DE LA CANCION",
+        ctk.CTkLabel(speed, text="SONG SPEED",
                      text_color=theme.TEXT_MUTED, font=theme.f_section(),
                      ).pack(anchor="w", padx=theme.SP_MD, pady=(theme.SP_SM, 0))
         self.speed_value = ctk.CTkLabel(speed, text="100%  ·  -- BPM",
@@ -332,7 +332,7 @@ class PracticeWindow(ctk.CTkToplevel):
         )
         self.bpm_slider.set(min(max(self.bpm0, _BPM_MIN), _BPM_MAX))
         self.bpm_slider.pack(fill="x", padx=theme.SP_MD, pady=(2, theme.SP_SM))
-        ctk.CTkButton(speed, text=" Restablecer", image=icon("rotate-ccw", 13),
+        ctk.CTkButton(speed, text=" Reset", image=icon("rotate-ccw", 13),
                       compound="left", height=28, width=118,
                       command=self._reset_bpm, font=theme.f_small(),
                       fg_color=theme.SURFACE3, hover_color=theme.SURFACE4,
@@ -352,7 +352,7 @@ class PracticeWindow(ctk.CTkToplevel):
                            corner_radius=theme.RAD_PANEL)
         met.grid(row=0, column=2, sticky="nsew", padx=(theme.SP_MD, 0))
         met.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(met, text="METRONOMO", text_color=theme.TEXT_MUTED,
+        ctk.CTkLabel(met, text="METRONOME", text_color=theme.TEXT_MUTED,
                      font=theme.f_section()).grid(
             row=0, column=0, columnspan=2, sticky="w",
             padx=theme.SP_MD, pady=(theme.SP_SM, 2))
@@ -371,10 +371,10 @@ class PracticeWindow(ctk.CTkToplevel):
         pulse_row.grid(row=2, column=0, columnspan=2, sticky="w",
                        padx=theme.SP_MD, pady=(theme.SP_XS, 0))
         self.pulse_seg = ctk.CTkSegmentedButton(
-            pulse_row, values=["Cancion", "Manual"], command=self._on_pulse_mode,
+            pulse_row, values=["Song", "Manual"], command=self._on_pulse_mode,
             height=28, font=theme.f_small(),
         )
-        self.pulse_seg.set("Cancion")
+        self.pulse_seg.set("Song")
         self.pulse_seg.pack(side="left", padx=(0, theme.SP_SM))
         self.pulse_entry = ctk.CTkEntry(pulse_row, width=54, height=28,
                                         justify="center", font=theme.f_body())
@@ -388,13 +388,13 @@ class PracticeWindow(ctk.CTkToplevel):
         sub_row.grid(row=3, column=0, columnspan=2, sticky="w",
                      padx=theme.SP_MD, pady=(theme.SP_XS, 0))
         self.sub_seg = ctk.CTkSegmentedButton(
-            sub_row, values=["Negras", "Corcheas"], command=self._on_subdivision,
+            sub_row, values=["Quarters", "Eighths"], command=self._on_subdivision,
             height=28, font=theme.f_small(),
         )
-        self.sub_seg.set("Negras")
+        self.sub_seg.set("Quarters")
         self.sub_seg.pack(side="left", padx=(0, theme.SP_SM))
         ctk.CTkCheckBox(
-            sub_row, text="Acento 1er tiempo", variable=self._metronome_accent,
+            sub_row, text="Accent beat 1", variable=self._metronome_accent,
             command=self._on_metronome_accent_toggle, font=theme.f_small(),
         ).pack(side="left")
         met.grid_rowconfigure(4, minsize=theme.SP_SM)
@@ -425,7 +425,7 @@ class PracticeWindow(ctk.CTkToplevel):
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             self.after(0, lambda: self._set_status(
-                f"No se pudo cargar el audio: {msg}", error=True))
+                f"Could not load audio: {msg}", error=True))
 
     def _on_loaded(self, events) -> None:
         self._events_sec = sorted(sec for sec, _ in events)
@@ -443,11 +443,11 @@ class PracticeWindow(ctk.CTkToplevel):
         if self._on_apply is not None:
             self.apply_btn.configure(state="normal")
         if self.player.available:
-            self._set_status("Espacio: play/pausa · Flechas: ±5s · M: metronomo")
+            self._set_status("Space: play/pause · Arrows: ±5s · M: metronome")
         else:
             self._set_status(
-                "Sin dispositivo de audio: conecta unos parlantes o auriculares "
-                "y vuelve a abrir esta ventana.", error=True)
+                "No audio device: connect speakers or headphones "
+                "and reopen this window.", error=True)
 
     # ------------------------------------------------- compases / anclaje manual
     def _anchor_index(self) -> int:
@@ -538,7 +538,7 @@ class PracticeWindow(ctk.CTkToplevel):
         was_playing = self.player.is_playing
         frac = self.player.fraction()
         self.player.pause()
-        self._set_status("Ajustando velocidad...")
+        self._set_status("Adjusting speed...")
 
         def work() -> None:
             try:
@@ -547,7 +547,7 @@ class PracticeWindow(ctk.CTkToplevel):
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc)
                 self.after(0, lambda: (self._set_status(
-                    f"No se pudo ajustar la velocidad: {msg}", error=True),
+                    f"Could not adjust speed: {msg}", error=True),
                     setattr(self, "_busy", False)))
 
         threading.Thread(target=work, daemon=True).start()
@@ -630,9 +630,9 @@ class PracticeWindow(ctk.CTkToplevel):
         self._update_bars()
         self._apply_tempo_async()  # re-anclar el acento del metronomo
         self._set_status(
-            f"Compas 1 marcado en {_fmt_time(self.beat_offset)} "
-            f"({self.beat_offset:.2f}s). Usa 'Aplicar al PDF' para regenerar "
-            "la partitura con este inicio."
+            f"Bar 1 marked at {_fmt_time(self.beat_offset)} "
+            f"({self.beat_offset:.2f}s). Use 'Apply to PDF' to regenerate "
+            "the score with this start."
         )
 
     def _on_apply_score(self) -> None:
@@ -644,7 +644,7 @@ class PracticeWindow(ctk.CTkToplevel):
         if self._on_apply is None:
             return
         self.apply_btn.configure(state="disabled")
-        self._set_status("Regenerando partitura...")
+        self._set_status("Regenerating score...")
 
         def status_cb(msg: str) -> None:
             if self.winfo_exists():
@@ -663,7 +663,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self._apply_tempo_async()
 
     def _on_subdivision(self, value: str) -> None:
-        self.subdivision = 2 if value == "Corcheas" else 1
+        self.subdivision = 2 if value == "Eighths" else 1
         self._apply_tempo_async()  # regenerar la pista de click
 
     def _on_pulse_mode(self, value: str) -> None:
@@ -678,13 +678,13 @@ class PracticeWindow(ctk.CTkToplevel):
             value = float(text)
         except ValueError:
             self._set_status(
-                f"'{text}' no es un numero: el pulso sigue en "
+                f"'{text}' is not a number: the pulse stays at "
                 f"{int(self.custom_bpm)} BPM.", error=True)
             value = self.custom_bpm  # entrada invalida: restaurar
         clamped = min(max(value, 20.0), 300.0)
         if clamped != value:
             self._set_status(
-                f"El pulso va de 20 a 300 BPM: ajustado a {int(clamped)}.")
+                f"The pulse range is 20 to 300 BPM: adjusted to {int(clamped)}.")
         value = clamped
         self.custom_bpm = value
         self.pulse_entry.delete(0, "end")
@@ -705,7 +705,7 @@ class PracticeWindow(ctk.CTkToplevel):
                 self.player.play()
                 self.play_btn.configure(image=icon("pause", 34, "dark"), text="")
             except Exception as exc:  # noqa: BLE001
-                self._set_status(f"No se pudo reproducir: {exc}", error=True)
+                self._set_status(f"Could not play: {exc}", error=True)
 
     def _on_restart(self) -> None:
         """Vuelve al inicio (sigue reproduciendo si estaba sonando)."""

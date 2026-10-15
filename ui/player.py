@@ -132,7 +132,7 @@ class DualTrackPlayer:
             return
         if sd is None:
             raise RuntimeError(
-                "No hay backend de audio (sounddevice/PortAudio) disponible."
+                "No audio backend (sounddevice/PortAudio) available."
             )
         self._close_stream()
         with self._lock:
@@ -171,7 +171,7 @@ class DualTrackPlayer:
     def render_mix(self, out_path: str) -> str:
         """Escribe a WAV la mezcla con las ganancias actuales."""
         if not self.loaded:
-            raise RuntimeError("No hay audio cargado para exportar.")
+            raise RuntimeError("No audio loaded to export.")
         mix = self._drums * self.gain_drums + self._no_drums * self.gain_no_drums
         peak = float(np.max(np.abs(mix))) if mix.size else 0.0
         if peak > 1.0:
@@ -301,7 +301,7 @@ class MixPlayer:
         if not self.loaded:
             return
         if sd is None:
-            raise RuntimeError("No hay backend de audio (sounddevice/PortAudio).")
+            raise RuntimeError("No audio backend (sounddevice/PortAudio).")
         self._close_stream()
         with self._lock:
             if self._pos >= self._total:

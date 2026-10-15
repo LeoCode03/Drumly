@@ -35,8 +35,8 @@ _LANE_STYLE = {
 }
 _LANE_LABEL = {
     "crash": "Crash", "hihat": "Hi-hat", "ride": "Ride",
-    "tom1": "Tom 1", "tom2": "Tom 2", "snare": "Caja",
-    "tom3": "Tom 3", "kick": "Bombo",
+    "tom1": "Tom 1", "tom2": "Tom 2", "snare": "Snare",
+    "tom3": "Tom 3", "kick": "Kick",
 }
 # Posicion vertical en "gaps" respecto a la linea superior del pentagrama
 # (notacion estandar de bateria). ADTOF emite 5 clases (crash/hihat/tom2/

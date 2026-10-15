@@ -69,13 +69,13 @@ def separate(
             progress(msg)
 
     if not os.path.isfile(audio_path):
-        raise FileNotFoundError(f"No existe el archivo de audio: {audio_path}")
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
     _ensure_ffmpeg_on_path()
     if not shutil.which("ffprobe"):
         raise RuntimeError(
-            "No se encontro ffmpeg/ffprobe (necesario para leer el audio). "
-            "Instalalo (ver README.md) y reinicia la terminal."
+            "ffmpeg/ffprobe not found (required to read the audio). "
+            "Install it (see README.md) and restart the terminal."
         )
 
     try:
@@ -85,17 +85,17 @@ def separate(
         from demucs.pretrained import get_model
     except ImportError as exc:
         raise ImportError(
-            "No se pudo importar Demucs. Instalalo con: pip install demucs\n"
-            f"(detalle: {exc})"
+            "Could not import Demucs. Install it with: pip install demucs\n"
+            f"(details: {exc})"
         ) from exc
 
     device = _pick_device()
-    report(f"Cargando Demucs (htdemucs) en {device.upper()}...")
+    report(f"Loading Demucs (htdemucs) on {device.upper()}...")
     model = get_model("htdemucs")
     model.to(device)
     model.eval()
 
-    report("Leyendo audio...")
+    report("Reading audio...")
     wav = AudioFile(audio_path).read(
         streams=0, samplerate=model.samplerate, channels=model.audio_channels
     )
@@ -104,7 +104,7 @@ def separate(
     std = ref.std() + 1e-8
     wav = (wav - ref.mean()) / std
 
-    report("Separando instrumentos (esto puede tardar)...")
+    report("Separating instruments (this may take a while)...")
     with torch.no_grad():
         sources = apply_model(
             model, wav[None], device=device, progress=True
@@ -113,25 +113,25 @@ def separate(
 
     if "drums" not in model.sources:
         raise RuntimeError(
-            "El modelo no expone un stem 'drums'. Stems: " + ", ".join(model.sources)
+            "The model does not expose a 'drums' stem. Stems: " + ", ".join(model.sources)
         )
     drums_idx = model.sources.index("drums")
 
     # Guardamos con soundfile (espera [frames, canales]) en vez de la utilidad de
     # Demucs, que enruta por torchaudio/torchcodec y es fragil entre versiones.
-    report("Guardando pista de bateria...")
+    report("Saving drum track...")
     os.makedirs(os.path.dirname(os.path.abspath(out_drums)) or ".", exist_ok=True)
     sf.write(out_drums, sources[drums_idx].cpu().numpy().T, model.samplerate)
 
     if out_no_drums:
-        report("Guardando mezcla sin bateria...")
+        report("Saving drumless mix...")
         os.makedirs(os.path.dirname(os.path.abspath(out_no_drums)) or ".", exist_ok=True)
         no_drums = sum(
             sources[i] for i in range(len(model.sources)) if i != drums_idx
         )
         sf.write(out_no_drums, no_drums.cpu().numpy().T, model.samplerate)
 
-    report("Separacion lista.")
+    report("Separation complete.")
     return out_drums, (out_no_drums if out_no_drums else None)
 
 
@@ -149,10 +149,10 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Uso: python -m pipeline.separator <cancion.mp3|wav> [drums.wav] [sin_bateria.wav]")
+        print("Usage: python -m pipeline.separator <song.mp3|wav> [drums.wav] [no_drums.wav]")
         raise SystemExit(1)
 
     src = sys.argv[1]
     out_d = sys.argv[2] if len(sys.argv) > 2 else os.path.splitext(src)[0] + "_drums.wav"
     out_n = sys.argv[3] if len(sys.argv) > 3 else None
-    print("Generado:", separate(src, out_d, out_n, progress=print))
+    print("Generated:", separate(src, out_d, out_n, progress=print))
