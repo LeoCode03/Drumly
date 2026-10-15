@@ -22,6 +22,7 @@ tempo (se conserva al re-estirar).
 
 from __future__ import annotations
 
+import queue
 import threading
 from typing import Callable, List, Optional, Tuple
 
@@ -179,6 +180,7 @@ class PracticeWindow(ctk.CTkToplevel):
         self._events_sec: List[float] = []  # onsets de las notas dibujadas (s)
         self._metronome = ctk.BooleanVar(value=False)
         self._metronome_accent = ctk.BooleanVar(value=True)
+        self._ui_calls: queue.SimpleQueue = queue.SimpleQueue()
         self._busy = False
         self._pending_render = False  # cambio recibido mientras _busy
         self._user_seeking = False
@@ -421,10 +423,10 @@ class PracticeWindow(ctk.CTkToplevel):
             self._orig_others = others.astype("float32")
             self._orig_sr = sr
             self._orig_duration = len(drums) / sr
-            self.after(0, lambda: self._on_loaded(events))
+            self._ui_calls.put(lambda: self._on_loaded(events))
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
-            self.after(0, lambda: self._set_status(
+            self._ui_calls.put(lambda: self._set_status(
                 f"No se pudo cargar el audio: {msg}", error=True))
 
     def _on_loaded(self, events) -> None:
@@ -543,10 +545,10 @@ class PracticeWindow(ctk.CTkToplevel):
         def work() -> None:
             try:
                 self._render_buffer(keep_fraction=frac)
-                self.after(0, lambda: self._after_tempo(was_playing))
+                self._ui_calls.put(lambda: self._after_tempo(was_playing))
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc)
-                self.after(0, lambda: (self._set_status(
+                self._ui_calls.put(lambda: (self._set_status(
                     f"No se pudo ajustar la velocidad: {msg}", error=True),
                     setattr(self, "_busy", False)))
 
@@ -741,6 +743,10 @@ class PracticeWindow(ctk.CTkToplevel):
         self._user_seeking = False
 
     def _tick(self) -> None:
+        # Tcl 9 no ejecuta after() llamado desde otro hilo: los workers dejan
+        # sus callbacks en la cola y se ejecutan aqui, en el hilo principal.
+        while not self._ui_calls.empty():
+            self._ui_calls.get()()
         if self.player.loaded:
             # Posicion que realmente SUENA = enviado al buffer menos la latencia
             # de salida (asi el cursor no va adelantado respecto al audio).
